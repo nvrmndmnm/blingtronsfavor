@@ -1,0 +1,2 @@
+Branch!STRING:64|Active!DEC:1|Build Key!STRING:32|Version!STRING:32|Product!STRING:64
+us|1|b1|not.a.version|wow
