@@ -49,7 +49,7 @@ func TestDetect(t *testing.T) {
 			flavorInfo:  "flavor.info.forever",
 			dirName:     "_forever_",
 			wantFlavor:  FlavorForever,
-			wantProduct: "wow_forever",
+			wantProduct: "wowf",
 			wantVersion: Version{Major: 1, Minor: 60, Patch: 1, Build: 58900},
 		},
 		{
@@ -245,6 +245,7 @@ func TestFlavorFromToken(t *testing.T) {
 		wantPtr bool
 	}{
 		{"wow", FlavorMainline, false},
+		{"wowf", FlavorForever, false},
 		{"wow_forever", FlavorForever, false},
 		{"wow_classic_era", FlavorClassic, false},
 		{"wow_mists", FlavorMists, false},
@@ -264,10 +265,35 @@ func TestFlavorFromToken(t *testing.T) {
 }
 
 func TestParseFlavorInfo(t *testing.T) {
-	if got := parseFlavorInfo("Region=us\nProduct = wow_forever \n"); got != "wow_forever" {
-		t.Errorf("parseFlavorInfo = %q, want %q", got, "wow_forever")
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "real two-line record",
+			in:   "Product Flavor!STRING:0\nwowf\n",
+			want: "wowf",
+		},
+		{
+			name: "key=value fallback",
+			in:   "Region=us\nProduct = wow_forever \n",
+			want: "wow_forever",
+		},
+		{
+			name: "key!type record with extra lines",
+			in:   "Region!STRING:0\nus\nProduct Flavor!STRING:0\nwowt\n",
+			want: "wowt",
+		},
+		{name: "no product key", in: "Region!STRING:0\nus\n", want: ""},
+		{name: "key without value", in: "Product Flavor!STRING:0\n", want: ""},
+		{name: "empty", in: "", want: ""},
 	}
-	if got := parseFlavorInfo("Region=us\n"); got != "" {
-		t.Errorf("parseFlavorInfo = %q, want empty", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseFlavorInfo(tc.in); got != tc.want {
+				t.Errorf("parseFlavorInfo(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
