@@ -1,0 +1,10 @@
+## Interface: 120100
+## Title: MainlineAddon
+## Version: 1.2.3
+## X-Curse-Project-ID: 123456
+## X-Wago-ID: wago-1
+## X-WoWI-ID: 99887
+## X-Website: https://example.org/mainline
+## X-Repository: https://github.com/example/mainline
+MainlineAddon.lua
+MainlineAddon.xml

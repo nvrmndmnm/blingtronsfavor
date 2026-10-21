@@ -1,0 +1,2 @@
+## Title: BrokenAddon (no Interface directive)
+BrokenAddon.lua
