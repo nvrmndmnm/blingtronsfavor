@@ -1,4 +1,5 @@
 # golangci-lint v2 configuration for bfctl.
+# The linter release itself is pinned in the Makefile (GOLANGCI_LINT_VERSION).
 version: "2"
 
 run:
