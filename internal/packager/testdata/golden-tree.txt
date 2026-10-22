@@ -1,0 +1,9 @@
+Foo/
+Foo/Foo.lua
+Foo/Foo.toc
+Foo/libs/
+Foo/libs/LibStub/
+Foo/libs/LibStub/LibStub.lua
+Foo_Extra/
+Foo_Extra/Foo_Extra.toc
+Foo_Extra/extra.lua

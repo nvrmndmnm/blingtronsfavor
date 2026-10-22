@@ -140,7 +140,8 @@ type boolFlag interface {
 // Go's flag package stops parsing at the first non-flag argument, which would
 // make "bfctl add owner/repo --explain" read --explain as a second positional;
 // moving flags to the front keeps flags and positionals freely mixed. "--"
-// still ends flag parsing: everything after it stays positional.
+// still ends flag parsing: everything after it stays positional, including
+// arguments that start with a dash.
 func interleave(fs *flag.FlagSet, args []string) []string {
 	flags := make([]string, 0, len(args))
 	positional := make([]string, 0, len(args))
@@ -171,7 +172,15 @@ func interleave(fs *flag.FlagSet, args []string) []string {
 			flags = append(flags, args[i])
 		}
 	}
-	return append(flags, positional...)
+	// Re-insert the "--" terminator before the positional block: without it
+	// fs.Parse would re-read positionals like "-owner/repo" as flags. The
+	// terminator is consumed by flag.Parse and never reaches fs.Args(), and
+	// only the first one is consumed, so a literal "--" positional survives.
+	out := make([]string, 0, len(flags)+len(positional)+1)
+	out = append(out, flags...)
+	out = append(out, "--")
+	out = append(out, positional...)
+	return out
 }
 
 // parseSubcommand parses args for fs and applies the logging configuration.

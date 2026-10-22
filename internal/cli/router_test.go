@@ -38,6 +38,9 @@ func TestInterleave(t *testing.T) {
 			args:        []string{"first", "-verbose", "second"},
 			wantPos:     []string{"first", "second"},
 			wantVerbose: true},
+		{name: "literal double dash kept as positional",
+			args:    []string{"first", "--", "--", "second"},
+			wantPos: []string{"first", "--", "second"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

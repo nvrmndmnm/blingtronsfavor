@@ -1,0 +1,15 @@
+package-as: Foo
+
+externals:
+  libs/LibStub:
+    url: "@LIBSTUB_URL@"
+    tag: v1.0
+
+move-folders:
+  Foo/modules/Foo_Extra: Foo_Extra
+
+ignore:
+  - "*.md"
+  - docs/
+  - "*.psd"
+  - modules/Debug.lua
