@@ -394,3 +394,87 @@ func TestParseRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+// TestRateLimitErrorHint pins the wait guidance rendered for a rate-limit
+// failure: Retry-After when GitHub sent one, the X-RateLimit-Reset window end
+// otherwise, and a fallback pointer when no timing was given at all.
+func TestRateLimitErrorHint(t *testing.T) {
+	now := time.Date(2026, 10, 22, 18, 40, 0, 0, time.UTC)
+	reset := now.Add(42*time.Minute + 10*time.Second)
+	cases := []struct {
+		name string
+		err  *RateLimitError
+		want []string // every substring must appear in the hint
+	}{
+		{
+			name: "reset in the future",
+			err:  &RateLimitError{Reset: reset},
+			want: []string{"quota resets at", reset.Local().Format("Mon 15:04:05"), "in 42m10s"},
+		},
+		{
+			name: "reset already past",
+			err:  &RateLimitError{Reset: now.Add(-time.Minute)},
+			want: []string{"retry now"},
+		},
+		{
+			name: "retry-after preferred over reset",
+			err:  &RateLimitError{RetryAfter: 90 * time.Second, Reset: reset},
+			want: []string{"retry after 1m30s"},
+		},
+		{
+			name: "no timing at all",
+			err:  &RateLimitError{},
+			want: []string{"rate_limit"},
+		},
+	}
+	for _, tc := range cases {
+		got := tc.err.hint(now)
+		for _, want := range tc.want {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: hint = %q, want it to contain %q", tc.name, got, want)
+			}
+		}
+		if msg := tc.err.Error(); !strings.HasPrefix(msg, "github: rate limited; ") {
+			t.Errorf("%s: Error() = %q, want the rate-limited prefix", tc.name, msg)
+		}
+	}
+}
+
+// TestRateLimitHint covers the wrapped-error lookup the CLI uses to decide
+// whether a failure was a rate limit and how long to wait.
+func TestRateLimitHint(t *testing.T) {
+	wrapped := fmt.Errorf("resolve acme/widget: %w", &RateLimitError{RetryAfter: time.Minute})
+	hint, ok := RateLimitHint(wrapped)
+	if !ok || !strings.Contains(hint, "retry after 1m0s") {
+		t.Fatalf("RateLimitHint(wrapped) = %q, %v; want the retry-after guidance", hint, ok)
+	}
+	if hint, ok := RateLimitHint(errors.New("boom")); ok {
+		t.Fatalf("RateLimitHint(other) = %q, %v; want ok == false", hint, ok)
+	}
+}
+
+// TestRateLimitedResponseSurfacesReset drives a real 403 rate-limit response
+// through the client and checks the error tells the caller how long to wait.
+func TestRateLimitedResponseSurfacesReset(t *testing.T) {
+	reset := fmt.Sprintf("%d", time.Now().Add(30*time.Minute).Unix())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", reset)
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprint(w, `{"message":"API rate limit exceeded"}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL, t.TempDir(), false)
+	_, err := c.Releases(context.Background(), testOwner, testRepo)
+	if !IsRateLimited(err) {
+		t.Fatalf("Releases error = %v, want a rate-limit error", err)
+	}
+	hint, ok := RateLimitHint(err)
+	if !ok || !strings.Contains(hint, "quota resets at") || !strings.Contains(hint, "in ") {
+		t.Fatalf("RateLimitHint = %q, %v; want reset guidance", hint, ok)
+	}
+	if msg := err.Error(); !strings.Contains(msg, hint) {
+		t.Errorf("Error() = %q, want it to carry the hint %q", msg, hint)
+	}
+}

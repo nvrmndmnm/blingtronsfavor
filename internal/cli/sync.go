@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/github"
 	"github.com/itp5b5/blessforge/internal/installer"
 	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/resolver"
@@ -72,11 +73,15 @@ func runSync(args []string, bi BuildInfo) int {
 	results := resolveAll(ctx, res, tasks, *workers, cfg)
 
 	var upToDate, updates, updated, sourceBuild, failed int
+	var rateHint string
 	for i, task := range tasks {
 		label := fmt.Sprintf("%s/%s", task.flavor, task.addon.ID)
 		result := results[i]
 		if result.err != nil {
 			fmt.Printf("%s: error: %v\n", label, result.err)
+			if h, ok := github.RateLimitHint(result.err); ok && rateHint == "" {
+				rateHint = h
+			}
 			failed++
 			continue
 		}
@@ -95,6 +100,9 @@ func runSync(args []string, bi BuildInfo) int {
 		default:
 			if err := installUpdate(ctx, res, task, plan); err != nil {
 				fmt.Printf("%s: error: %v\n", label, err)
+				if h, ok := github.RateLimitHint(err); ok && rateHint == "" {
+					rateHint = h
+				}
 				failed++
 				continue
 			}
@@ -118,6 +126,9 @@ func runSync(args []string, bi BuildInfo) int {
 		summary += fmt.Sprintf(", %d failed", failed)
 	}
 	fmt.Println(summary)
+	if rateHint != "" {
+		fmt.Printf("note: GitHub rate limited — %s; rerun \"bfctl sync\" after that\n", rateHint)
+	}
 
 	if failed > 0 || (*strict && sourceBuild > 0) {
 		return ExitPartial

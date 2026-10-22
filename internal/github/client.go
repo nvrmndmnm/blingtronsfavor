@@ -124,12 +124,40 @@ type RateLimitError struct {
 	Reset      time.Time
 }
 
-// Error implements the error interface.
+// Error implements the error interface. Beyond the Retry-After guidance it
+// spells out how long the caller must wait until the rate-limit window
+// resets, so a limited run knows when it may retry.
 func (e *RateLimitError) Error() string {
-	if e.RetryAfter > 0 {
-		return fmt.Sprintf("github: rate limited; retry after %s", e.RetryAfter.Round(time.Second))
+	return "github: rate limited; " + e.hint(time.Now())
+}
+
+// hint renders the wait guidance as of now: the honoured Retry-After when
+// GitHub sent one, otherwise the X-RateLimit-Reset window end, otherwise a
+// pointer at the rate_limit endpoint that answers the question out of band.
+func (e *RateLimitError) hint(now time.Time) string {
+	switch {
+	case e.RetryAfter > 0:
+		return fmt.Sprintf("retry after %s", e.RetryAfter.Round(time.Second))
+	case !e.Reset.IsZero():
+		at := e.Reset.Local().Format("Mon 15:04:05")
+		wait := e.Reset.Sub(now).Round(time.Second)
+		if wait <= 0 {
+			return fmt.Sprintf("quota reset at %s — retry now", at)
+		}
+		return fmt.Sprintf("quota resets at %s (in %s)", at, wait)
+	default:
+		return "no reset time given; GET https://api.github.com/rate_limit shows when the window resets"
 	}
-	return "github: rate limited"
+}
+
+// RateLimitHint reports how long to wait before retrying when err is or
+// wraps a *RateLimitError. ok is false for any other error.
+func RateLimitHint(err error) (string, bool) {
+	var rle *RateLimitError
+	if !errors.As(err, &rle) {
+		return "", false
+	}
+	return rle.hint(time.Now()), true
 }
 
 // IsRateLimited reports whether err is or wraps a *RateLimitError.
