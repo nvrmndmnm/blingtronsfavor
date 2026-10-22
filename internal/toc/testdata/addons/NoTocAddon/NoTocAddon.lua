@@ -1,0 +1,1 @@
+-- fixture addon directory without any .toc
