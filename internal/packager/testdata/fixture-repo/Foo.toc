@@ -1,0 +1,4 @@
+## Interface: 11509
+## Title: Foo
+## Notes: Fixture addon for the packager tests.
+Foo.lua
