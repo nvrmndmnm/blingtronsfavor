@@ -8,23 +8,8 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/itp5b5/blessforge/internal/state"
 )
-
-// emptyState is the starter state file written by "bfctl init".
-const emptyState = `{
-  "addons": {}
-}
-`
-
-// bootstrapStateFormat is the tiny state file written by "bfctl init
-// --path". The
-// full structure lands in a later milestone and replaces this.
-const bootstrapStateFormat = `{
-  "root": %q,
-  "flavorDir": %q,
-  "addons": {}
-}
-`
 
 func runInit(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("init")
@@ -46,6 +31,7 @@ func runInit(args []string, _ BuildInfo) int {
 		slog.Error("resolve state file", "error", err)
 		return ExitError
 	}
+	store := state.Open(statePath)
 	if *flavorDir != "" {
 		install, err := client.Detect(*flavorDir)
 		if err != nil {
@@ -53,8 +39,26 @@ func runInit(args []string, _ BuildInfo) int {
 			return ExitError
 		}
 		fmt.Printf("detected %s\n", install.Badge())
-		state := fmt.Sprintf(bootstrapStateFormat, install.Root, install.FlavorDir)
-		if err := os.WriteFile(statePath, []byte(state), 0o600); err != nil {
+		st, err := store.Load()
+		if err != nil {
+			// An unreadable state file is replaced by the freshly detected
+			// client rather than blocking the bootstrap.
+			slog.Warn("replace unreadable state", "path", statePath, "error", err)
+			st = state.New()
+		}
+		// v1 keeps one WoW root per flavor (plan R10): a second root for the
+		// same flavor overwrites the recorded one, with a warning.
+		if prev := st.Client(install.Flavor); prev != nil && prev.Root != install.FlavorDir {
+			fmt.Printf("warning: overwriting recorded %s root %s with %s\n",
+				install.Flavor.DisplayName(), prev.Root, install.FlavorDir)
+		}
+		st.Clients[install.Flavor] = &state.ClientState{
+			Flavor:    install.Flavor,
+			Root:      install.FlavorDir,
+			Interface: install.Interface,
+			Addons:    make(map[string]*state.AddonState),
+		}
+		if err := store.Save(st); err != nil {
 			slog.Error("write state file", "error", err)
 			return ExitError
 		}
@@ -70,7 +74,7 @@ func runInit(args []string, _ BuildInfo) int {
 		slog.Error("inspect state file", "error", err)
 		return ExitError
 	}
-	if err := os.WriteFile(statePath, []byte(emptyState), 0o600); err != nil {
+	if err := store.Save(state.New()); err != nil {
 		slog.Error("write state file", "error", err)
 		return ExitError
 	}
