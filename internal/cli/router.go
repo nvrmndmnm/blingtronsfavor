@@ -20,9 +20,10 @@ type BuildInfo struct {
 
 // Exit codes shared by every subcommand.
 const (
-	ExitOK    = 0 // success
-	ExitError = 1 // runtime failure
-	ExitUsage = 2 // usage error
+	ExitOK      = 0 // success
+	ExitError   = 1 // runtime failure
+	ExitUsage   = 2 // usage error
+	ExitPartial = 4 // partial failure: some units succeeded, some failed
 )
 
 // Logging flags shared by the global flag set and every subcommand flag set.
