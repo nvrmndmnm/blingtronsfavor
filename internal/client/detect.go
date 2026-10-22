@@ -18,7 +18,7 @@ const (
 var ErrBuildInfoMissing = errors.New(".build.info not found")
 
 // Detect inspects the flavor directory (e.g. ".../World of Warcraft/_forever_")
-// and its parent install root, and reports the flavor, product token and
+// and its parent install root, and reports the flavor, product identifier and
 // interface version of that client.
 func Detect(flavorDir string) (*ClientInstall, error) {
 	resolved, err := filepath.Abs(flavorDir)
@@ -37,7 +37,7 @@ func Detect(flavorDir string) (*ClientInstall, error) {
 	}
 	root := filepath.Dir(resolved)
 
-	// .flavor.info carries the Product token; without it the flavor is
+	// .flavor.info carries the Product identifier; without it the flavor is
 	// inferred from the flavor directory name.
 	product := ""
 	if data, err := os.ReadFile(filepath.Join(resolved, flavorInfoName)); err == nil {
@@ -45,8 +45,8 @@ func Detect(flavorDir string) (*ClientInstall, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read %s: %w", flavorInfoName, err)
 	}
-	flavor, ptrFromProduct := flavorFromToken(product)
-	dirFlavor, ptrFromDir := flavorFromToken(filepath.Base(resolved))
+	flavor, ptrFromProduct := flavorFromProduct(product)
+	dirFlavor, ptrFromDir := flavorFromProduct(filepath.Base(resolved))
 	if product == "" {
 		flavor = dirFlavor
 	}
@@ -77,7 +77,7 @@ func Detect(flavorDir string) (*ClientInstall, error) {
 	}, nil
 }
 
-// parseFlavorInfo extracts the product token from .flavor.info. The file
+// parseFlavorInfo extracts the product identifier from .flavor.info. The file
 // carries one two-line record per entry: a "Key!TYPE:idx" header line
 // followed by the value line, e.g.
 //
@@ -111,7 +111,7 @@ func parseFlavorInfo(data string) string {
 	return ""
 }
 
-// isProductKey reports whether a .flavor.info key names the product token.
+// isProductKey reports whether a .flavor.info key names the product identifier.
 func isProductKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "product", "product flavor":
@@ -120,12 +120,12 @@ func isProductKey(key string) bool {
 	return false
 }
 
-// flavorFromToken maps a product token or flavor directory name to the
-// nearest flavor and reports PTR/Beta markers in it. PTR/Beta tokens carry a
-// "ptr"/"beta" marker or a trailing "t" ("wowt"), and map to the nearest real
-// flavor (e.g. "wowxptr" -> mainline, PTR).
-func flavorFromToken(token string) (Flavor, bool) {
-	t := strings.ToLower(strings.TrimSpace(token))
+// flavorFromProduct maps a product identifier or flavor directory name to
+// the nearest flavor and reports PTR/Beta markers in it. PTR/Beta product
+// identifiers carry a "ptr"/"beta" marker or a trailing "t" ("wowt"), and map
+// to the nearest real flavor (e.g. "wowxptr" -> mainline, PTR).
+func flavorFromProduct(product string) (Flavor, bool) {
+	t := strings.ToLower(strings.TrimSpace(product))
 	isPtr := strings.Contains(t, "ptr") || strings.Contains(t, "beta") ||
 		(strings.HasSuffix(t, "t") && len(t) > 2)
 	switch {

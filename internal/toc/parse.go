@@ -94,7 +94,7 @@ func splitDirective(line string) (key, value string, ok bool) {
 
 // addDirective records one metadata directive. Duplicate Interface lines and
 // multi-value Interface lines all contribute to Interfaces; non-numeric
-// Interface tokens are ignored. Unknown keys are dropped.
+// Interface values are ignored. Unknown keys are dropped.
 func (t *Toc) addDirective(key, value string) {
 	switch strings.ToLower(key) {
 	case "interface":
