@@ -1,5 +1,3 @@
-# BlessForge (bfctl) build automation — https://taskfile.dev
-# Requires go-task v3 (developed against v3.54.0).
 version: '3'
 
 vars:
