@@ -148,7 +148,7 @@ func copyFile(dst, src string, perm os.FileMode) error {
 	if err != nil {
 		return fmt.Errorf("staging %s: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("staging %s: %w", dst, err)

@@ -4,8 +4,10 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -13,6 +15,29 @@ const (
 	// dirPerm is used for every directory bfctl creates (owner only).
 	dirPerm = 0o700
 )
+
+// ExpandPath resolves a leading "~" in path to the user's home directory so
+// shell-quoted paths like "~/games/wow" work as expected; a bare "~" is
+// likewise expanded. Other paths, including "~user" forms, are returned
+// unchanged.
+func ExpandPath(path string) (string, error) {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		return home, nil
+	}
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, rest), nil
+}
 
 // ConfigDir returns the bfctl configuration directory:
 // $XDG_CONFIG_HOME/bfctl, falling back to ~/.config/bfctl.

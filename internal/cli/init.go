@@ -33,7 +33,7 @@ func runInit(args []string, _ BuildInfo) int {
 	}
 	store := state.Open(statePath)
 	if *flavorDir != "" {
-		install, err := client.Detect(*flavorDir)
+		install, err := client.Detect(expandPathFlag("path", *flavorDir))
 		if err != nil {
 			slog.Error("detect client", "error", err)
 			return ExitError

@@ -95,7 +95,7 @@ func TestETagCacheStoresOn200(t *testing.T) {
 		w.Header().Set("X-RateLimit-Reset", "4102444800")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, body)
+		_, _ = fmt.Fprint(w, body)
 	}))
 	defer srv.Close()
 
@@ -164,7 +164,7 @@ func TestETagRevalidationReplaysCachedBodyOn304(t *testing.T) {
 			w.Header().Set("X-RateLimit-Reset", "4102444800")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, body)
+			_, _ = fmt.Fprint(w, body)
 		case 2:
 			// A 304 consumes no quota; these headers must not
 			// overwrite the snapshot from the first response.
@@ -221,7 +221,7 @@ func TestETagExpiredOrAbsentFallsBackToNetwork(t *testing.T) {
 			w.Header().Set("ETag", `"v2"`)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, body)
+			_, _ = fmt.Fprint(w, body)
 		}))
 		t.Cleanup(srv.Close)
 		return srv, log

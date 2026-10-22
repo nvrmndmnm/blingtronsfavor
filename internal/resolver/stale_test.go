@@ -80,7 +80,7 @@ func newStaleResolver(t *testing.T, api staleAPI) *Resolver {
 			key := strings.TrimPrefix(p, "/compare/")
 			if status, ok := api.compareStatus[key]; ok {
 				w.WriteHeader(status)
-				fmt.Fprint(w, `{"message":"boom"}`)
+				_, _ = fmt.Fprint(w, `{"message":"boom"}`)
 				return
 			}
 			cmp, ok := api.compare[key]

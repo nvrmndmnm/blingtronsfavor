@@ -305,10 +305,10 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("github: GET %s: %w", reqURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
-	switch {
-	case resp.StatusCode == http.StatusNotModified:
+	switch resp.StatusCode {
+	case http.StatusNotModified:
 		// A 304 replays the cached body and consumes no rate-limit
 		// quota, so the rate counters are left untouched; only the
 		// freshness stamp is refreshed.
@@ -321,7 +321,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		}
 		return json.Unmarshal(entry.Body, out)
 
-	case resp.StatusCode == http.StatusOK:
+	case http.StatusOK:
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 		if err != nil {
 			return fmt.Errorf("github: read response %s: %w", reqURL, err)
