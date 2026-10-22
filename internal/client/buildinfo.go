@@ -51,7 +51,7 @@ func parseBuildInfo(data string) ([]buildRow, error) {
 }
 
 // selectBuildRow picks the .build.info row with Active == 1 whose Product
-// equals the .flavor.info token. When the token is unknown, rows are matched
+// equals the .flavor.info product. When the product is unknown, rows are matched
 // by flavor instead. If several rows qualify, the highest version wins.
 func selectBuildRow(rows []buildRow, product string, flavor Flavor) (Version, error) {
 	matches := func(row buildRow) bool {
@@ -62,7 +62,7 @@ func selectBuildRow(rows []buildRow, product string, flavor Flavor) (Version, er
 		if product != "" {
 			return strings.EqualFold(rowProduct, product)
 		}
-		rowFlavor, _ := flavorFromToken(rowProduct)
+		rowFlavor, _ := flavorFromProduct(rowProduct)
 		return rowFlavor == flavor
 	}
 	var (

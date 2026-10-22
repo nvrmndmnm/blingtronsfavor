@@ -102,7 +102,7 @@ func fromBootstrap(boot bootstrapState) State {
 
 // flavorFromDirName infers the client flavor from a WoW flavor directory
 // name (e.g. "_forever_"). It mirrors the directory matching inside
-// client.flavorFromToken; unknown names map to mainline.
+// client.flavorFromProduct; unknown names map to mainline.
 func flavorFromDirName(dir string) client.Flavor {
 	name := strings.ToLower(filepath.Base(dir))
 	switch {

@@ -1,5 +1,5 @@
 // Package client detects a World of Warcraft client install: which flavor it
-// is, which product token it carries and which interface version its addons
+// is, which product identifier it carries and which interface version its addons
 // must target.
 package client
 
@@ -64,7 +64,7 @@ func (v Version) newerThan(other Version) bool {
 type ClientInstall struct {
 	Root, FlavorDir string
 	Flavor          Flavor
-	Product         string  // .flavor.info token
+	Product         string  // .flavor.info product identifier
 	Version         Version // {Major, Minor, Patch, Build int}
 	Interface       int     // e.g. 16001
 	IsPtr           bool    // PTR/Beta install

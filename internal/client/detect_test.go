@@ -71,7 +71,7 @@ func TestDetect(t *testing.T) {
 			wantVersion: Version{Major: 5, Minor: 5, Patch: 4},
 		},
 		{
-			name:        "ptr token marks IsPtr",
+			name:        "ptr marker marks IsPtr",
 			buildInfo:   "build.info.ptr",
 			flavorInfo:  "flavor.info.ptr",
 			dirName:     "_ptr_",
@@ -238,9 +238,9 @@ func TestVersionInterface(t *testing.T) {
 	}
 }
 
-func TestFlavorFromToken(t *testing.T) {
+func TestFlavorFromProduct(t *testing.T) {
 	cases := []struct {
-		token   string
+		product string
 		want    Flavor
 		wantPtr bool
 	}{
@@ -256,10 +256,10 @@ func TestFlavorFromToken(t *testing.T) {
 		{"wow_forever_beta", FlavorForever, true},
 	}
 	for _, tc := range cases {
-		got, gotPtr := flavorFromToken(tc.token)
+		got, gotPtr := flavorFromProduct(tc.product)
 		if got != tc.want || gotPtr != tc.wantPtr {
-			t.Errorf("flavorFromToken(%q) = (%q, %v), want (%q, %v)",
-				tc.token, got, gotPtr, tc.want, tc.wantPtr)
+			t.Errorf("flavorFromProduct(%q) = (%q, %v), want (%q, %v)",
+				tc.product, got, gotPtr, tc.want, tc.wantPtr)
 		}
 	}
 }
