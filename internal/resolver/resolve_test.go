@@ -30,7 +30,7 @@ func newFixture(t *testing.T, releases string, assets map[string]string) *httpte
 	mux.HandleFunc("/repos/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("ETag", `"fixture-v1"`)
-		fmt.Fprint(w, strings.ReplaceAll(releases, "{{BASE}}", srv.URL))
+		_, _ = fmt.Fprint(w, strings.ReplaceAll(releases, "{{BASE}}", srv.URL))
 	})
 	mux.HandleFunc("/assets/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/assets/")
@@ -39,7 +39,7 @@ func newFixture(t *testing.T, releases string, assets map[string]string) *httpte
 			http.NotFound(w, r)
 			return
 		}
-		fmt.Fprint(w, strings.ReplaceAll(body, "{{BASE}}", srv.URL))
+		_, _ = fmt.Fprint(w, strings.ReplaceAll(body, "{{BASE}}", srv.URL))
 	})
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -565,7 +565,7 @@ func TestFetchDownloadsAndUnpacks(t *testing.T) {
 		"Widget-1.3.0/Widget/Widget.toc": "## Interface: 120100\n",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, asset)
+		_, _ = fmt.Fprint(w, asset)
 	}))
 	defer srv.Close()
 
@@ -587,7 +587,7 @@ func TestFetchDownloadsAndUnpacks(t *testing.T) {
 // TestFetchRefusesNonZipAssets: only zip release assets are unpacked.
 func TestFetchRefusesNonZipAssets(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "not an archive")
+		_, _ = fmt.Fprint(w, "not an archive")
 	}))
 	defer srv.Close()
 

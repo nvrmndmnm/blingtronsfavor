@@ -67,7 +67,7 @@ func (in *Installer) Install(req Request) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	if err := reconcile(trashRoot, in.Store); err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (in *Installer) Remove(flavor client.Flavor, id string) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Unlock()
+	defer func() { _ = lock.Unlock() }()
 	if err := reconcile(trashRoot, in.Store); err != nil {
 		return err
 	}

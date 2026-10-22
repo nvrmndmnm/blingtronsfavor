@@ -99,9 +99,9 @@ func printClientStatus(cs *state.ClientState, offline bool) {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	if offline {
-		fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC")
+		_, _ = fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC")
 	} else {
-		fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
+		_, _ = fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
 	}
 	for _, id := range ids {
 		a := cs.Addons[id]
@@ -110,7 +110,7 @@ func printClientStatus(cs *state.ClientState, offline bool) {
 		if !offline {
 			row += "\t" + addonUpstream(a)
 		}
-		fmt.Fprintln(w, row)
+		_, _ = fmt.Fprintln(w, row)
 	}
 	_ = w.Flush()
 }
@@ -136,7 +136,7 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 		fmt.Fprintln(os.Stderr, "bfctl status: no client configured; pass --flavor/--interface or run bfctl init --path ... (verdicts shown as Unknown)")
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "Addon\tTOC\tInterfaces\tVerdict")
+	_, _ = fmt.Fprintln(w, "Addon\tTOC\tInterfaces\tVerdict")
 	for _, addon := range addons {
 		tocName, interfaces := "-", "-"
 		if addon.Toc != nil {
@@ -149,7 +149,7 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 				interfaces = strings.Join(parts, " ")
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", addon.Dir, tocName, interfaces, addon.Verdict)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", addon.Dir, tocName, interfaces, addon.Verdict)
 	}
 	_ = w.Flush()
 	return ExitOK

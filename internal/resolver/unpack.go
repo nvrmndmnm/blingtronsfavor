@@ -38,7 +38,7 @@ func (r *Resolver) Fetch(ctx context.Context, plan Plan, dir string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("download %s: %w", plan.URL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download %s: %s", plan.URL, resp.Status)
 	}
@@ -74,7 +74,7 @@ func Unpack(zipPath, dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unpack %s: only zip release assets are supported: %w", zipPath, err)
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 	for _, f := range zr.File {
 		if err := extractEntry(dir, f); err != nil {
 			return "", err
@@ -107,7 +107,7 @@ func extractEntry(dir string, f *zip.File) error {
 	if err != nil {
 		return fmt.Errorf("unpack %s: %w", f.Name, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	perm := f.Mode().Perm()
 	if perm == 0 {
 		perm = 0o644

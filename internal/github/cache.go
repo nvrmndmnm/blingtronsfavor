@@ -65,6 +65,11 @@ func saveCache(path string, e *cacheEntry) error {
 		return fmt.Errorf("create cache temp file: %w", err)
 	}
 	name := tmp.Name()
+	if err := tmp.Chmod(cachePerm); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return fmt.Errorf("chmod cache entry %s: %w", name, err)
+	}
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(name)

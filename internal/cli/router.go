@@ -140,7 +140,7 @@ func configureLogging() {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprint(w, `bfctl - BlessForge addon manager
+	_, _ = fmt.Fprint(w, `bfctl - BlessForge addon manager
 
 Usage:
   bfctl [global flags] <command> [flags]
@@ -148,9 +148,9 @@ Usage:
 Commands:
 `)
 	for _, c := range commands() {
-		fmt.Fprintf(w, "  %-8s %s\n", c.name, c.short)
+		_, _ = fmt.Fprintf(w, "  %-8s %s\n", c.name, c.short)
 	}
-	fmt.Fprint(w, `
+	_, _ = fmt.Fprint(w, `
 Global flags:
   --verbose  enable debug logging
   --quiet    only log errors
@@ -161,7 +161,7 @@ Run "bfctl <command> --help" for command flags.
 
 func subcommandUsage(fs *flag.FlagSet) {
 	out := fs.Output()
-	fmt.Fprintf(out, "bfctl %s - %s\n\nUsage:\n  bfctl %s [flags]\n\nFlags:\n",
+	_, _ = fmt.Fprintf(out, "bfctl %s - %s\n\nUsage:\n  bfctl %s [flags]\n\nFlags:\n",
 		fs.Name(), shortFor(fs.Name()), fs.Name())
 	fs.PrintDefaults()
 }
