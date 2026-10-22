@@ -57,6 +57,11 @@ func runSync(args []string, bi BuildInfo) int {
 		fmt.Fprintf(os.Stderr, "bfctl sync: read state: %v\n", err)
 		return ExitError
 	}
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bfctl sync: read config: %v\n", err)
+		return ExitError
+	}
 	tasks := collectTasks(st)
 	res, err := newResolver(bi)
 	if err != nil {
@@ -64,7 +69,7 @@ func runSync(args []string, bi BuildInfo) int {
 		return ExitError
 	}
 	ctx := context.Background()
-	results := resolveAll(ctx, res, tasks, *workers)
+	results := resolveAll(ctx, res, tasks, *workers, cfg)
 
 	var upToDate, updates, updated, sourceBuild, failed int
 	for i, task := range tasks {
@@ -98,7 +103,7 @@ func runSync(args []string, bi BuildInfo) int {
 		}
 		fmt.Printf("%s: %s\n", label, status)
 		if *explain {
-			fmt.Printf("    plan: %s\n", plan.Reason)
+			fmt.Printf("    plan: %s ref=%s reason: %s\n", plan.Strategy, plan.Ref, plan.Reason)
 		}
 	}
 
@@ -167,8 +172,10 @@ func collectTasks(st *state.State) []syncTask {
 // resolveAll resolves every task with at most workers concurrent calls — the
 // errgroup-with-limit pattern the plan calls for, kept on a semaphore plus a
 // WaitGroup so the module stays dependency-free. Per-task failures are
-// results rather than fatal errors: sync reports them and keeps going.
-func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, workers int) []resolveResult {
+// results rather than fatal errors: sync reports them and keeps going. The
+// user config supplies the staleness window (staleness_days) and any
+// per-addon strategy pin.
+func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, workers int, cfg *state.Config) []resolveResult {
 	results := make([]resolveResult, len(tasks))
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
@@ -188,11 +195,14 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			pin, _ := cfg.PinnedStrategy(task.addon.ID, ref.Slug())
 			results[i].plan, results[i].err = res.Resolve(ctx, resolver.Request{
-				Owner:    ref.Owner,
-				Repo:     ref.Repo,
-				Flavor:   task.flavor,
-				Tracking: task.addon.Tracking,
+				Owner:          ref.Owner,
+				Repo:           ref.Repo,
+				Flavor:         task.flavor,
+				Tracking:       task.addon.Tracking,
+				Staleness:      cfg.Staleness(),
+				PinnedStrategy: pin,
 			})
 		}(i)
 	}

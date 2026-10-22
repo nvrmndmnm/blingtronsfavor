@@ -40,8 +40,17 @@ type Plan struct {
 type Request struct {
 	Owner, Repo   string
 	Flavor        client.Flavor
-	Tracking      string // "stable" (default) or the branch a source build would track
+	Tracking      string // "stable" (default), "release" (strategy pin), a pinned tag, or the branch a source build would track
 	DefaultBranch string // repository default branch, used as the source Ref fallback
+
+	// Staleness is the staleness window of the M4 detector; zero selects
+	// state.DefaultStalenessDays.
+	Staleness time.Duration
+
+	// PinnedStrategy is the config strategy override for the addon, if
+	// any. A pin wins over every staleness heuristic: the detector never
+	// fires for a pinned addon.
+	PinnedStrategy state.Strategy
 }
 
 // RepoRef is a parsed GitHub repository reference.
@@ -135,10 +144,14 @@ func (r *Resolver) httpClient() *http.Client {
 }
 
 // Resolve runs the resolution order of the plan (spec §2) for one repository
-// and flavor: release.json metadata first, zip-name heuristics second, and a
-// source-pkgmeta Plan (with a "source build required" reason) when no release
-// asset can serve the flavor. Only API and download failures are errors; a
-// repository that needs a source build resolves to a well-formed Plan.
+// and flavor: the M4 staleness detector first (a stale repository switches to
+// a source-pkgmeta build at the newest tag / branch HEAD), then release.json
+// metadata, zip-name heuristics second, and a source-pkgmeta Plan (with a
+// "source build required" reason) when no release asset can serve the flavor.
+// Only API and download failures are errors; a repository that needs a source
+// build resolves to a well-formed Plan. A failure inside the staleness check
+// degrades to plain release resolution — the detector must never break
+// installs — but a configured strategy pin is always honored.
 func (r *Resolver) Resolve(ctx context.Context, req Request) (Plan, error) {
 	if req.Owner == "" || req.Repo == "" {
 		return Plan{}, errors.New("resolve: owner and repo are required")
@@ -147,16 +160,32 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("resolve %s/%s: %w", req.Owner, req.Repo, err)
 	}
-	if best := r.pick(ctx, releases, req); best != nil {
-		return best.plan(), nil
-	}
 	ref := RepoRef{Owner: req.Owner, Repo: req.Repo}
 	branch := req.Tracking
-	if branch == "" || branch == "stable" {
+	if branch == "" || branch == trackingStable || branch == trackingRelease {
 		branch = req.DefaultBranch
 	}
 	if branch == "" {
 		branch = "main"
+	}
+	if req.PinnedStrategy == state.StrategySourcePkgmeta {
+		return Plan{
+			Strategy: state.StrategySourcePkgmeta,
+			URL:      ref.URL() + ".git",
+			Ref:      branch,
+			Reason:   "pinned to strategy " + string(state.StrategySourcePkgmeta),
+		}, nil
+	}
+	if d, err := r.CheckStale(ctx, req, releases); err == nil && d.Trigger {
+		return Plan{
+			Strategy: state.StrategySourcePkgmeta,
+			URL:      ref.URL() + ".git",
+			Ref:      d.Ref,
+			Reason:   d.Reason,
+		}, nil
+	}
+	if best := r.pick(ctx, releases, req); best != nil {
+		return best.plan(), nil
 	}
 	return Plan{
 		Strategy: state.StrategySourcePkgmeta,

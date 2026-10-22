@@ -55,3 +55,16 @@ type CommitData struct {
 type CommitAuthor struct {
 	Date time.Time `json:"date"`
 }
+
+// CompareResult is the subset of a compare response the staleness detector
+// needs: the list of files the base...head delta touched.
+type CompareResult struct {
+	TotalCommits int           `json:"total_commits"`
+	Files        []CompareFile `json:"files"`
+}
+
+// CompareFile is one changed file in a compare result.
+type CompareFile struct {
+	Filename string `json:"filename"`
+	Status   string `json:"status"`
+}

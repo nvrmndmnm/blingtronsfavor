@@ -29,6 +29,7 @@ const stateLockTimeout = 5 * time.Second
 func runAdd(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("add")
 	branchFlag := fs.String("branch", "", "branch to track instead of stable releases")
+	strategyFlag := fs.String("strategy", "", "install strategy pin: \"release\" pins to GitHub releases and silences the staleness detector")
 	flavorFlag := fs.String("flavor", "", "client flavor to install for: mainline, forever, classic or mists (required when several are configured)")
 	forceFlag := fs.Bool("force", false, "take over addon directories owned by another addon")
 	explainFlag := fs.Bool("explain", false, "show why the plan was selected")
@@ -53,6 +54,18 @@ func runAdd(args []string, bi BuildInfo) int {
 	tracking := "stable"
 	if *branchFlag != "" {
 		tracking = *branchFlag
+	}
+	switch *strategyFlag {
+	case "":
+	case "release":
+		if *branchFlag != "" {
+			fmt.Fprintln(os.Stderr, "bfctl add: --strategy release and --branch are mutually exclusive")
+			return ExitUsage
+		}
+		tracking = "release"
+	default:
+		fmt.Fprintf(os.Stderr, "bfctl add: unsupported --strategy %q (only \"release\" is a pin)\n", *strategyFlag)
+		return ExitUsage
 	}
 	res, err := newResolver(bi)
 	if err != nil {
