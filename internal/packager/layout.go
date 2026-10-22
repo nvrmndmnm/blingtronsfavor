@@ -251,6 +251,13 @@ func exportTree(ctx context.Context, wcDir, dest string) error {
 		if err != nil {
 			return fmt.Errorf("read git archive of %s: %w", wcDir, err)
 		}
+		if hdr.Typeflag == tar.TypeXGlobalHeader {
+			// Archive metadata, not a file: git writes a "pax_global_header"
+			// entry carrying the commit hash. Per-entry PAX headers and GNU
+			// long-name records are consumed inside archive/tar and never
+			// reach this loop.
+			continue
+		}
 		target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
 		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
 			return fmt.Errorf("git archive entry %q escapes the package", hdr.Name)
