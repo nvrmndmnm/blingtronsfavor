@@ -9,6 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
+
+	"github.com/itp5b5/blessforge/internal/paths"
 )
 
 // BuildInfo carries version metadata injected at link time via -ldflags.
@@ -113,10 +116,68 @@ func subcommandFlagSet(name string) *flag.FlagSet {
 	return fs
 }
 
+// expandPathFlag resolves a leading "~" in a user-supplied path flag via
+// paths.ExpandPath, so a shell-quoted "~/..." reaches the filesystem APIs as
+// an absolute path. When the home directory cannot be resolved the flag is
+// left untouched and a warning is logged, letting the downstream stat
+// produce the concrete diagnostic.
+func expandPathFlag(name, path string) string {
+	expanded, err := paths.ExpandPath(path)
+	if err != nil {
+		slog.Warn("expand ~ in --"+name, "error", err)
+		return path
+	}
+	return expanded
+}
+
+// boolFlag is the optional interface a flag.Value uses to report a boolean
+// flag, which does not consume a separate argument on the command line.
+type boolFlag interface {
+	IsBoolFlag() bool
+}
+
+// interleave reorders args so every flag precedes the positional arguments.
+// Go's flag package stops parsing at the first non-flag argument, which would
+// make "bfctl add owner/repo --explain" read --explain as a second positional;
+// moving flags to the front keeps flags and positionals freely mixed. "--"
+// still ends flag parsing: everything after it stays positional.
+func interleave(fs *flag.FlagSet, args []string) []string {
+	flags := make([]string, 0, len(args))
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := strings.TrimLeft(arg, "-")
+		if strings.Contains(name, "=") {
+			continue // -flag=value carries its own value
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			continue // unknown flag: let fs.Parse reject it
+		}
+		if bf, ok := f.Value.(boolFlag); ok && bf.IsBoolFlag() {
+			continue // boolean flags take no separate value
+		}
+		if i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, positional...)
+}
+
 // parseSubcommand parses args for fs and applies the logging configuration.
 // When ok is false the caller must return code; -h/--help counts as success.
 func parseSubcommand(fs *flag.FlagSet, args []string) (code int, ok bool) {
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(interleave(fs, args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK, false
 		}

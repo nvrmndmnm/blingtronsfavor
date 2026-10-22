@@ -32,7 +32,7 @@ func runStatus(args []string, _ BuildInfo) int {
 		return ExitUsage
 	}
 	if *scanDir != "" {
-		return runScan(*scanDir, *scanFlavor, *scanInterface)
+		return runScan(expandPathFlag("scan", *scanDir), *scanFlavor, *scanInterface)
 	}
 	return runStatusTable(*offline)
 }
