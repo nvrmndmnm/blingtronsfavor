@@ -252,7 +252,7 @@ func (in *Installer) swap(t *txn, trashSet, names []string) error {
 // refused: bfctl never silently takes over a foreign folder. Directory names
 // are compared case-insensitively so upgrades that only change letter case
 // are recognised as this addon's own directories.
-func planSwap(cs *state.ClientState, req Request, names, addonsDir, prevDirs []string) ([]string, error) {
+func planSwap(cs *state.ClientState, req Request, names []string, addonsDir string, prevDirs []string) ([]string, error) {
 	entries, err := os.ReadDir(addonsDir)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", addonsDir, err)

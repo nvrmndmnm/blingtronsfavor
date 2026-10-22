@@ -160,13 +160,14 @@ func Select(dir string, flavor client.Flavor) (*Toc, error) {
 }
 
 // verdictFor computes the compatibility verdict of a selected toc against a
-// client target. A nil toc is NoToc; a nil target yields Unknown.
+// client target. A nil target yields Unknown — nothing can be compared, even
+// when the directory ships no toc; a nil toc against a known target is NoToc.
 func verdictFor(selected *Toc, target *Target) Verdict {
-	if selected == nil {
-		return VerdictNoToc
-	}
 	if target == nil {
 		return VerdictUnknown
+	}
+	if selected == nil {
+		return VerdictNoToc
 	}
 	if len(selected.Interfaces) == 0 {
 		return VerdictMismatch

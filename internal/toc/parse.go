@@ -13,7 +13,7 @@ import (
 )
 
 // utf8BOM is the UTF-8 byte order mark .toc files may start with.
-var utf8BOM = []byte{0xEF, 0xBF, 0xBB}
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 // knownSuffixes are the flavor-specific toc suffixes, e.g. "DeadlyBossMods_
 // Mainline.toc". The order is the fallback precedence when a directory ships

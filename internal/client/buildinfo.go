@@ -101,6 +101,9 @@ func parseVersion(s string) (Version, error) {
 	var v Version
 	targets := []*int{&v.Major, &v.Minor, &v.Patch, &v.Build}
 	for i := range targets {
+		if i >= len(parts) {
+			break // missing build segment defaults to 0
+		}
 		n, err := strconv.Atoi(parts[i])
 		if err != nil || n < 0 {
 			return Version{}, fmt.Errorf("bad version %q", s)
