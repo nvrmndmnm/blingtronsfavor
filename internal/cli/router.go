@@ -40,14 +40,22 @@ type command struct {
 	run   func(args []string, bi BuildInfo) int
 }
 
-var commands = []command{
-	{name: "init", short: "create the bfctl configuration and state", run: runInit},
-	{name: "adopt", short: "adopt an existing addon into bfctl management", run: runAdopt},
-	{name: "add", short: "add an addon to the manifest", run: runAdd},
-	{name: "sync", short: "sync installed addons with the manifest", run: runSync},
-	{name: "status", short: "show configured addons", run: runStatus},
-	{name: "remove", short: "remove an addon from the manifest", run: runRemove},
-	{name: "version", short: "print version information", run: runVersion},
+// commands returns the command table. It is a function rather than a package
+// variable because the run handlers call back into the flag-set and usage
+// helpers (runAdd → subcommandFlagSet → subcommandUsage → shortFor), which
+// need this table: a package-level variable would form an initialization
+// cycle, which Go rejects, while a reference cycle through functions is
+// legal.
+func commands() []command {
+	return []command{
+		{name: "init", short: "create the bfctl configuration and state", run: runInit},
+		{name: "adopt", short: "adopt an existing addon into bfctl management", run: runAdopt},
+		{name: "add", short: "add an addon to the manifest", run: runAdd},
+		{name: "sync", short: "sync installed addons with the manifest", run: runSync},
+		{name: "status", short: "show configured addons", run: runStatus},
+		{name: "remove", short: "remove an addon from the manifest", run: runRemove},
+		{name: "version", short: "print version information", run: runVersion},
+	}
 }
 
 // Run executes the CLI with the given arguments and returns the process exit
@@ -73,7 +81,7 @@ func Run(args []string, bi BuildInfo) int {
 		usage(os.Stderr)
 		return ExitUsage
 	}
-	for _, c := range commands {
+	for _, c := range commands() {
 		if c.name == rest[0] {
 			return c.run(rest[1:], bi)
 		}
@@ -139,7 +147,7 @@ Usage:
 
 Commands:
 `)
-	for _, c := range commands {
+	for _, c := range commands() {
 		fmt.Fprintf(w, "  %-8s %s\n", c.name, c.short)
 	}
 	fmt.Fprint(w, `
@@ -159,7 +167,7 @@ func subcommandUsage(fs *flag.FlagSet) {
 }
 
 func shortFor(name string) string {
-	for _, c := range commands {
+	for _, c := range commands() {
 		if c.name == name {
 			return c.short
 		}
