@@ -1,4 +1,4 @@
 Branch!STRING:64|Active!DEC:1|Build Key!STRING:32|Version!STRING:32|Product!STRING:64
-us|1|b1|1.60.0.58712|wow_forever
-us|1|b2|1.60.1.58900|wow_forever
+us|1|b1|1.60.0.58712|wowf
+us|1|b2|1.60.1.58900|wowf
 us|1|b3|12.1.0.59201|wow

@@ -77,19 +77,47 @@ func Detect(flavorDir string) (*ClientInstall, error) {
 	}, nil
 }
 
-// parseFlavorInfo extracts the Product token from .flavor.info Key=Value
-// lines. It returns "" when the file carries no Product key.
+// parseFlavorInfo extracts the product token from .flavor.info. The file
+// carries one two-line record per entry: a "Key!TYPE:idx" header line
+// followed by the value line, e.g.
+//
+//	Product Flavor!STRING:0
+//	wowf
+//
+// Key=Value lines are tolerated as a fallback. It returns "" when the file
+// carries no product key.
 func parseFlavorInfo(data string) string {
-	for _, line := range strings.Split(data, "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
+	lines := strings.Split(data, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(key), "Product") {
+		if key, _, ok := strings.Cut(line, "!"); ok {
+			if !isProductKey(key) {
+				continue
+			}
+			for _, value := range lines[i+1:] {
+				if value = strings.TrimSpace(value); value != "" {
+					return value
+				}
+			}
+			continue
+		}
+		if key, value, ok := strings.Cut(line, "="); ok && isProductKey(key) {
 			return strings.TrimSpace(value)
 		}
 	}
 	return ""
+}
+
+// isProductKey reports whether a .flavor.info key names the product token.
+func isProductKey(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "product", "product flavor":
+		return true
+	}
+	return false
 }
 
 // flavorFromToken maps a product token or flavor directory name to the
@@ -101,7 +129,7 @@ func flavorFromToken(token string) (Flavor, bool) {
 	isPtr := strings.Contains(t, "ptr") || strings.Contains(t, "beta") ||
 		(strings.HasSuffix(t, "t") && len(t) > 2)
 	switch {
-	case strings.Contains(t, "forever"), strings.Contains(t, "camelot"):
+	case t == "wowf", strings.Contains(t, "forever"), strings.Contains(t, "camelot"):
 		return FlavorForever, isPtr
 	case strings.Contains(t, "mists"), strings.Contains(t, "progression"):
 		return FlavorMists, isPtr
