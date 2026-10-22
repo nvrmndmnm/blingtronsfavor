@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/gitops"
 	"github.com/itp5b5/blessforge/internal/paths"
 )
@@ -44,6 +45,15 @@ type Options struct {
 	// Externals is the external cache libraries are fetched through
 	// (the shared ~/.cache/bfctl/externals cache by default).
 	Externals *ExternalCache
+
+	// Flavor is the detected client flavor the TOC flavor split selects the
+	// flavor-specific .toc for.
+	Flavor client.Flavor
+
+	// Interface is the detected client's TOC interface version (e.g. 16001
+	// for Forever, 120100 for Retail). It is written into every staged .toc
+	// and checked by the post-build validation gate.
+	Interface int
 }
 
 // Result is one successful build.
@@ -69,7 +79,13 @@ type Result struct {
 //  6. rename the package folder to package-as (the TOC base name);
 //  7. move-folders: move each listed subtree to its top-level sibling
 //     folder — a colliding destination is a hard error;
-//  8. commit the finished top-level folders into OutDir.
+//  8. substitute the @project-…@ keywords and strip the debug blocks in
+//     every .toc, .lua and .xml file;
+//  9. TOC flavor split: exactly one "<folder>.toc" per staged folder, with
+//     "## Interface:" rewritten to the detected client's interface;
+// 10. run the post-build validation gate (matching .toc per folder,
+//     interface match, no leftover @project- token);
+// 11. commit the finished top-level folders into OutDir.
 //
 // Every step works in a private temporary directory and only step 8 writes
 // OutDir, so any failure leaves no partial install behind.
@@ -79,6 +95,9 @@ func Build(ctx context.Context, spec Spec, opts Options) (*Result, error) {
 	}
 	if spec.Owner == "" || spec.Repo == "" {
 		return nil, errors.New("packager: repository owner and name are required")
+	}
+	if opts.Interface == 0 {
+		return nil, errors.New("packager: the detected client's interface version is required (Options.Interface)")
 	}
 
 	reposDir := opts.ReposDir
@@ -160,6 +179,23 @@ func Build(ctx context.Context, spec Spec, opts Options) (*Result, error) {
 		return nil, err
 	}
 	if err := applyMoveFolders(compose, meta, pkgName); err != nil {
+		return nil, err
+	}
+
+	subst, err := SubstitutionFromGit(ctx, wc)
+	if err != nil {
+		return nil, err
+	}
+	if err := substituteTree(compose, subst); err != nil {
+		return nil, err
+	}
+	if err := splitTocTree(compose, opts.Flavor, opts.Interface); err != nil {
+		return nil, err
+	}
+	// The validation gate runs before the installer ever sees the bundle: a
+	// folder without a matching .toc, a wrong interface or a leftover
+	// @project- token fails the build with no partial install left behind.
+	if err := Validate(compose, opts.Interface); err != nil {
 		return nil, err
 	}
 

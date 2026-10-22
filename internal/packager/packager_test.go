@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/itp5b5/blessforge/internal/client"
 )
 
 // requireGit skips the fixture-driven tests when git is not installed: the
@@ -112,14 +114,16 @@ func newFixture(t *testing.T) *fixture {
 	return &fixture{repoURL: fileURL(repo), repoRef: ref, libstubURL: fileURL(libstub)}
 }
 
-// testOptions returns build options with private caches and out as the
-// compose target.
+// testOptions returns build options with private caches, out as the compose
+// target and a Classic Era client (Interface 11509) as the detected client.
 func testOptions(t *testing.T, out string) Options {
 	t.Helper()
 	return Options{
 		OutDir:    out,
 		ReposDir:  filepath.Join(t.TempDir(), "repos"),
 		Externals: NewExternalCacheAt(filepath.Join(t.TempDir(), "externals")),
+		Flavor:    client.FlavorClassic,
+		Interface: 11509,
 	}
 }
 
@@ -227,6 +231,8 @@ func TestExternalFetchedOnce(t *testing.T) {
 			OutDir:    filepath.Join(base, name),
 			ReposDir:  filepath.Join(base, "repos"),
 			Externals: cache,
+			Flavor:    client.FlavorClassic,
+			Interface: 11509,
 		}
 	}
 	first, err := Build(context.Background(), spec, opts("out1"))
