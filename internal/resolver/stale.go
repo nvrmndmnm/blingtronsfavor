@@ -83,8 +83,8 @@ func (r *Resolver) CheckStale(ctx context.Context, req Request, releases []githu
 	}
 
 	stale := req.staleness()
-	workKnown := workName != "" && !work.When.IsZero()
-	delta := work.When.Sub(anchor.PublishedAt)
+	workKnown := workName != "" && !work.when.IsZero()
+	delta := work.when.Sub(anchor.PublishedAt)
 	switch {
 	case !workKnown:
 		return StaleDecision{Reason: "staleness unverifiable"}, nil

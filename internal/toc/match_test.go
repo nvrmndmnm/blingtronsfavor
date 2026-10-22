@@ -127,6 +127,7 @@ func TestScan(t *testing.T) {
 		t.Fatalf("Scan: %v", err)
 	}
 	wantOrder := []string{
+		"BrokenAddon",
 		"CamelotAddon", "ClassicAddon", "ClassicDualAddon", "ForeverAddon",
 		"MainlineAddon", "MistsAddon", "MultiAddon", "NoTocAddon", "PrecedenceAddon",
 	}
@@ -134,6 +135,7 @@ func TestScan(t *testing.T) {
 		t.Fatalf("Scan returned %d addons, want %d", len(addons), len(wantOrder))
 	}
 	wantVerdicts := map[string]Verdict{
+		"BrokenAddon":   VerdictMismatch,
 		"CamelotAddon":  VerdictMatch,
 		"ForeverAddon":  VerdictMatch,
 		"MultiAddon":    VerdictMultiMatch,
