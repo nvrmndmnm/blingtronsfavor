@@ -73,6 +73,16 @@ func EnsureLayout() error {
 	return EnsureDir(cacheDir)
 }
 
+// HTTPCacheName is the cache subdirectory holding HTTP response cache
+// entries (the GitHub API client's ETag cache).
+const HTTPCacheName = "http"
+
+// HTTPCacheDir returns the cache subdirectory for HTTP response cache
+// entries, creating it lazily with 0700.
+func HTTPCacheDir() (string, error) {
+	return CacheSubdir(HTTPCacheName)
+}
+
 // CacheSubdir returns a named cache subdirectory, creating it lazily.
 func CacheSubdir(name string) (string, error) {
 	cacheDir, err := CacheDir()
