@@ -7,11 +7,88 @@
 package state
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/paths"
 )
+
+// DefaultStalenessDays is the staleness window used when the user has not
+// configured one: a repository whose newest work is more than this many days
+// past its latest release is a source-build candidate (M4 staleness
+// detector).
+const DefaultStalenessDays = 14
+
+// Config is the user configuration in ~/.config/bfctl/config.json. The file
+// is optional; a missing or partial file falls back to the defaults below.
+// Every knob is optional.
+type Config struct {
+	// StalenessDays overrides DefaultStalenessDays.
+	StalenessDays int `json:"staleness_days,omitempty"`
+
+	// Strategies pins addons to an install strategy, keyed by addon ID or
+	// "owner/repo" slug. A pin of StrategyRelease silences the staleness
+	// detector for that addon.
+	Strategies map[string]Strategy `json:"strategies,omitempty"`
+}
+
+// Staleness returns the configured staleness window in days, defaulting to
+// DefaultStalenessDays when unset or nonsensical.
+func (c *Config) Staleness() time.Duration {
+	days := DefaultStalenessDays
+	if c != nil && c.StalenessDays > 0 {
+		days = c.StalenessDays
+	}
+	return time.Duration(days) * 24 * time.Hour
+}
+
+// PinnedStrategy returns the strategy addon id or slug is pinned to, if any.
+// Both the addon ID and the "owner/repo" slug are accepted as lookup keys.
+func (c *Config) PinnedStrategy(id, slug string) (Strategy, bool) {
+	if c == nil {
+		return "", false
+	}
+	for _, key := range []string{id, slug} {
+		if key == "" {
+			continue
+		}
+		if s, ok := c.Strategies[key]; ok && s != "" {
+			return s, true
+		}
+	}
+	return "", false
+}
+
+// LoadConfig reads ~/.config/bfctl/config.json. A missing file yields the
+// defaults; a malformed file is an error.
+func LoadConfig() (*Config, error) {
+	dir, err := paths.ConfigDir()
+	if err != nil {
+		return nil, err
+	}
+	return LoadConfigFile(filepath.Join(dir, "config.json"))
+}
+
+// LoadConfigFile reads one config file, returning defaults when it does not
+// exist.
+func LoadConfigFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &Config{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{}
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
 
 // State is the whole state file, one entry per client flavor.
 type State struct {

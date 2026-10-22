@@ -41,6 +41,11 @@ const (
 	// acceptHeader is the media type GitHub asks for on REST calls.
 	acceptHeader = "application/vnd.github+json"
 
+	// MaxCompareFiles is GitHub's cap on the files[] list of a compare
+	// response: a delta touching more files than this reports only the first
+	// window, so callers cannot tell what the full delta contained.
+	MaxCompareFiles = 300
+
 	// maxBodyBytes caps how much response body is read into the cache;
 	// larger bodies are truncated and will fail JSON decoding.
 	maxBodyBytes = 8 << 20
@@ -240,6 +245,19 @@ func (c *Client) HeadCommit(ctx context.Context, owner, repo, branch string) (*C
 		return nil, err
 	}
 	return &commit, nil
+}
+
+// Compare compares base...head (three-dot: merge-base to head) and returns
+// the changed files. GitHub caps the files list at MaxCompareFiles entries;
+// a caller that needs the complete delta must treat a full window as
+// incomplete.
+func (c *Client) Compare(ctx context.Context, owner, repo, base, head string) (*CompareResult, error) {
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, repo, url.PathEscape(base), url.PathEscape(head))
+	var cmp CompareResult
+	if err := c.get(ctx, path, &cmp); err != nil {
+		return nil, err
+	}
+	return &cmp, nil
 }
 
 // Rate reports the most recent rate-limit snapshot. Only non-304 responses
