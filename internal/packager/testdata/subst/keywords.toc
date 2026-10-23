@@ -1,0 +1,5 @@
+## Interface: 11509
+## Title: Keywords
+## Version: @project-version@
+## Notes: Built @project-date-iso@ from @project-hash@ (@project-abbreviated-hash@)
+Foo.lua

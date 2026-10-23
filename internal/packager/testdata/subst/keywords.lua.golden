@@ -1,0 +1,4 @@
+local VERSION = "v1.2.3"
+local HASH = "abc1234"
+local ABBREV = "def5678"
+local DATE = "2026-10-22T12:00:00Z"

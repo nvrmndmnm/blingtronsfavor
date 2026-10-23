@@ -1,0 +1,3 @@
+## Interface: 16002
+## Title: Foo
+Foo.lua
