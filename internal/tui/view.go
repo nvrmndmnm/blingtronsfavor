@@ -6,6 +6,9 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/itp5b5/blessforge/internal/state"
 )
 
 var (
@@ -88,7 +91,7 @@ func (m Model) detailPane() string {
 		headerStyle.Render(a.Name),
 		fmt.Sprintf("Source    %s (%s)", a.Source, a.SourceKind),
 		fmt.Sprintf("Tracking  %s", a.Tracking),
-		fmt.Sprintf("Strategy  %s", a.Strategy),
+		fmt.Sprintf("Strategy  %s", service.StrategyLabel(state.Strategy(a.Strategy))),
 		fmt.Sprintf("Installed %s", a.Installed),
 		fmt.Sprintf("Status    %s", a.Status),
 	}

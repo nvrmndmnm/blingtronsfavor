@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbletea/v2"
 
 	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/itp5b5/blessforge/internal/state"
 )
 
 // Run opens the TUI. The context is signal-aware: SIGINT cancels an
@@ -149,7 +150,7 @@ func (m *Model) refreshRows() {
 	}
 	rows := make([]table.Row, 0, len(m.rows))
 	for _, a := range m.rows {
-		rows = append(rows, table.Row{a.Name, a.Installed, a.Upstream, a.Strategy, m.statusText(a)})
+		rows = append(rows, table.Row{a.Name, a.Installed, a.Upstream, service.StrategyLabel(state.Strategy(a.Strategy)), m.statusText(a)})
 	}
 	m.table.SetRows(rows)
 }
