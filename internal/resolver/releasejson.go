@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/itp5b5/blessforge/internal/client"
@@ -19,6 +20,8 @@ const maxMetaBytes = 1 << 20
 // MetaEntry is one asset record parsed from a release.json metadata asset —
 // the file BigWigsMods/packager attaches to a release next to the packaged
 // zips, naming each asset's game flavor and whether it bundles libraries.
+// A record that serves several flavors at once (a universal zip with a
+// nested per-flavor metadata list) yields one entry per flavor.
 type MetaEntry struct {
 	Flavor    client.Flavor
 	FlavorRaw string // the key/field spelling the metadata used
@@ -29,8 +32,9 @@ type MetaEntry struct {
 
 // flavorAliases maps normalized release.json flavor keys to client flavors.
 // Which key the Forever flavor uses (camelot? forever?) is risk R4 of the
-// plan — without a real recorded sample both spellings (and the packager's
-// retail/vanilla/mop aliases) are accepted so neither locks us out.
+// plan: the recorded DeadlyBossMods release.json sample uses "forever", and
+// the camelot spelling (with the packager's retail/vanilla/mop aliases) stays
+// accepted alongside it so no other packager output locks us out.
 var flavorAliases = map[string]client.Flavor{
 	"mainline":          client.FlavorMainline,
 	"retail":            client.FlavorMainline,
@@ -87,12 +91,15 @@ func flavorForKey(s string) (client.Flavor, bool) {
 func isForeignFlavor(s string) bool { return foreignFlavorKeys[normalizeFlavorKey(s)] }
 
 // ParseMeta parses a release.json payload into asset records. The schema is
-// tolerated rather than pinned (plan risk R4 — a real recorded sample is
-// still missing): the document may be a record list, an object holding a
-// record list under a well-known key, a flavor -> record(s) map, or a single
-// record, and record keys accept the common spellings of flavor, file, url
-// and nolib. Malformed JSON is an error; a payload without asset records
-// simply yields no entries and lets the caller fall back to heuristics.
+// tolerated rather than pinned (plan risk R4): the document may be a record
+// list, an object holding a record list under a well-known key, a flavor ->
+// record(s) map, or a single record, and record keys accept the common
+// spellings of flavor, file, url and nolib. A record may name one flavor, or
+// — like the DeadlyBossMods universal package (recorded sample) — declare a
+// nested per-flavor "metadata" list of every client flavor its single zip
+// serves; one entry is emitted per supported flavor. Malformed JSON is an
+// error; a payload without asset records simply yields no entries and lets
+// the caller fall back to heuristics.
 func ParseMeta(data []byte) ([]MetaEntry, error) {
 	var doc any
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -120,8 +127,8 @@ func metaEntriesFrom(item any) []MetaEntry {
 
 // metaEntriesFromDoc collects the asset records of one JSON object.
 func metaEntriesFromDoc(doc map[string]any) []MetaEntry {
-	if e, ok := metaEntryFromRecord(doc); ok {
-		return []MetaEntry{e}
+	if out := metaEntriesFromRecord(doc); len(out) > 0 {
+		return out
 	}
 	for _, key := range []string{"assets", "releases", "files", "packages", "artifacts", "entries"} {
 		if v, ok := doc[key]; ok {
@@ -146,49 +153,157 @@ func metaEntriesFromDoc(doc map[string]any) []MetaEntry {
 	return out
 }
 
-// metaEntryFromRecord reads one asset record from a JSON object. It reports
-// false when the object names no file and no URL — e.g. a container object.
-func metaEntryFromRecord(m map[string]any) (MetaEntry, bool) {
-	var e MetaEntry
+// metaFlavorKeys are the record fields naming one game flavor.
+var metaFlavorKeys = []string{"flavor", "flavor_string", "flavorString", "game_flavor", "flavor_name", "type", "channel"}
+
+// metaFlavorListKeys are the record fields enumerating every game flavor
+// one asset serves — the nested "metadata" list of the DeadlyBossMods
+// universal package, whose single zip carries a TOC per flavor.
+var metaFlavorListKeys = []string{"metadata", "flavor_metadata", "flavors", "game_flavors"}
+
+// flavorEvidence is one flavor claim of an asset record: the client flavor
+// it maps to and the raw spelling the metadata used.
+type flavorEvidence struct {
+	flavor client.Flavor
+	raw    string
+}
+
+// metaEntriesFromRecord reads one asset record from a JSON object: one entry
+// per game flavor the record serves — a universal package declares a nested
+// per-flavor list and yields one entry per supported flavor — or one
+// unflavored entry when the record names no usable flavor, for a
+// flavor-keyed map to fill in. It yields nil when the object names no file
+// and no URL — e.g. a container object.
+func metaEntriesFromRecord(m map[string]any) []MetaEntry {
+	var file, link string
 	for _, key := range []string{"file", "filename", "name", "asset", "path", "zip"} {
 		if s, ok := m[key].(string); ok && s != "" {
-			e.File = s
+			file = s
 			break
 		}
 	}
 	for _, key := range []string{"url", "download", "download_url", "browser_download_url", "link"} {
 		if s, ok := m[key].(string); ok && s != "" {
-			e.URL = s
+			link = s
 			break
 		}
 	}
-	if e.File == "" && e.URL == "" {
-		return MetaEntry{}, false
+	if file == "" && link == "" {
+		return nil
 	}
-	if !isZipName(e.File) && !isZipName(e.URL) {
-		return MetaEntry{}, false // a container object, not an asset record
+	if !isZipName(file) && !isZipName(link) {
+		return nil // a container object, not an asset record
 	}
-	for _, key := range []string{"flavor", "flavor_string", "flavorString", "game_flavor", "flavor_name", "type", "channel"} {
-		if s, ok := m[key].(string); ok && s != "" {
-			if fl, known := flavorForKey(s); known {
-				e.Flavor, e.FlavorRaw = fl, s
-			}
-			break
-		}
+	nolib := metaNoLib(m)
+	flavors := metaFlavors(m)
+	if len(flavors) == 0 {
+		return []MetaEntry{{NoLib: nolib, File: file, URL: link}}
 	}
+	out := make([]MetaEntry, 0, len(flavors))
+	for _, f := range flavors {
+		out = append(out, MetaEntry{Flavor: f.flavor, FlavorRaw: f.raw, NoLib: nolib, File: file, URL: link})
+	}
+	return out
+}
+
+// metaNoLib reads the record's bundled-library flag: the nolib spellings
+// first, the inverted "libraries bundled" spellings overriding them.
+func metaNoLib(m map[string]any) bool {
+	var nolib bool
 	for _, key := range []string{"nolib", "nolibs", "no_lib", "noLib"} {
 		if v, ok := metaBool(m[key]); ok {
-			e.NoLib = v
+			nolib = v
 			break
 		}
 	}
 	for _, key := range []string{"libraries", "libs", "bundled_libs"} {
 		if v, ok := metaBool(m[key]); ok {
-			e.NoLib = !v
+			nolib = !v
 			break
 		}
 	}
-	return e, true
+	return nolib
+}
+
+// metaFlavors collects the distinct flavor evidences of one record. The
+// nested per-flavor lists enumerate every flavor the asset serves (a
+// universal package lists several); failing those, one flavor field names
+// the single flavor, and a record without a usable spelling yields no
+// evidence — the caller then treats the record as untagged. Foreign
+// spellings (wrath, cata, …) are never evidence: they name another game's
+// package. Unknown spellings inside an explicit list are dropped the same
+// way — the enumeration is exact and serves no client bfctl supports.
+func metaFlavors(m map[string]any) []flavorEvidence {
+	var out []flavorEvidence
+	seen := map[client.Flavor]bool{}
+	add := func(fl client.Flavor, raw string) {
+		if seen[fl] {
+			return
+		}
+		seen[fl] = true
+		out = append(out, flavorEvidence{flavor: fl, raw: raw})
+	}
+	for _, key := range metaFlavorListKeys {
+		if v, ok := m[key]; ok {
+			for _, ev := range flavorEvidencesFrom(v) {
+				add(ev.flavor, ev.raw)
+			}
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	for _, key := range metaFlavorKeys {
+		s, ok := m[key].(string)
+		if !ok || s == "" {
+			continue
+		}
+		if fl, known := flavorForKey(s); known {
+			add(fl, s)
+		}
+		break // the first present spelling is the record's flavor
+	}
+	return out
+}
+
+// flavorEvidencesFrom collects the flavor evidences of one nested
+// per-flavor list element: a string ("forever"), an object with a flavor
+// field ({"flavor": "forever", "interface": 16001}) or a map keyed by
+// flavor spelling. Unknown and foreign spellings are dropped.
+func flavorEvidencesFrom(v any) []flavorEvidence {
+	var out []flavorEvidence
+	switch x := v.(type) {
+	case string:
+		if fl, known := flavorForKey(x); known {
+			out = append(out, flavorEvidence{flavor: fl, raw: x})
+		}
+	case []any:
+		for _, el := range x {
+			out = append(out, flavorEvidencesFrom(el)...)
+		}
+	case map[string]any:
+		for _, key := range metaFlavorKeys {
+			s, ok := x[key].(string)
+			if !ok || s == "" {
+				continue
+			}
+			if fl, known := flavorForKey(s); known {
+				out = append(out, flavorEvidence{flavor: fl, raw: s})
+			}
+			break // the first present spelling is the element's flavor
+		}
+		keys := make([]string, 0, len(x))
+		for key := range x {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys) // map iteration order must not leak into plan reasons
+		for _, key := range keys {
+			if fl, known := flavorForKey(key); known {
+				out = append(out, flavorEvidence{flavor: fl, raw: key})
+			}
+		}
+	}
+	return out
 }
 
 // metaBool reads a boolean metadata field: a JSON bool, a JSON number
