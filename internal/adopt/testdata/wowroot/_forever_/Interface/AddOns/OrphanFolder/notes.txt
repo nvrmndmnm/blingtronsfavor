@@ -1,0 +1,2 @@
+This folder ships no .toc file: adopt must report it as an orphan instead
+of proposing a binding.

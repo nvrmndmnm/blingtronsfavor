@@ -1,0 +1,6 @@
+## Interface: 11509 16001 120100
+## Title: WeakAuras
+## Version: 5.19.0
+## X-Wago-ID: 1050902
+## X-Repository: https://github.com/WeakAuras/WeakAuras2
+WeakAuras.lua

@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: Deadly Boss Mods
+## Version: 11.2.0
+## X-Curse-Project-ID: 8315
+## X-Website: https://deadlybossmods.com
+DBM-Core.lua

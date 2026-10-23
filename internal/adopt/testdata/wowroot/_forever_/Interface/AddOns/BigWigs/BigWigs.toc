@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: BigWigs
+## Version: v380
+## X-Curse-Project-ID: 2382
+BigWigs.lua
