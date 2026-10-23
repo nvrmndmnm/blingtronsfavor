@@ -47,12 +47,18 @@ tasks:
       - task: test
 
   release:
-    desc: Package bin/bfctl as dist/bfctl-<version>-<os>-<arch>.tar.gz
+    desc: Package bin/bfctl as dist/bfctl-<version>-<os>-<arch>.tar.gz with a sha256 checksum
     deps:
       - build
     cmds:
       - mkdir -p dist
-      - tar -czf dist/{{.BINARY}}-{{.VERSION}}-$(go env GOOS)-$(go env GOARCH).tar.gz -C bin {{.BINARY}}
+      - rm -rf dist/release-stage
+      - mkdir -p dist/release-stage/docs
+      - cp bin/{{.BINARY}} LICENSE README.md dist/release-stage/
+      - cp docs/bfctl.1 dist/release-stage/docs/
+      - tar -czf dist/{{.BINARY}}-{{.VERSION}}-$(go env GOOS)-$(go env GOARCH).tar.gz -C dist/release-stage {{.BINARY}} LICENSE README.md docs
+      - rm -rf dist/release-stage
+      - cd dist && sha256sum {{.BINARY}}-{{.VERSION}}-$(go env GOOS)-$(go env GOARCH).tar.gz > {{.BINARY}}-{{.VERSION}}-$(go env GOOS)-$(go env GOARCH).tar.gz.sha256
 
   clean:
     desc: Remove build artifacts

@@ -6,7 +6,6 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/installer"
-	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
