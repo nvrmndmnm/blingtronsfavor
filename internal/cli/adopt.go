@@ -131,13 +131,13 @@ func adoptCount(rep *adopt.Report) int {
 func printAdoptReport(rep *adopt.Report, flavor client.Flavor, dryRun bool) {
 	fmt.Printf("proposed bindings for %s (%s)\n\n", rep.Dir, flavor)
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "ACTION\tID\tSOURCE\tVERSION\tFOLDERS\tWHY\n")
+	_, _ = fmt.Fprintf(w, "ACTION\tID\tSOURCE\tVERSION\tFOLDERS\tWHY\n")
 	for _, g := range rep.Groups {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			g.Action, g.ID, sourceLabel(g.Source), dash(g.Version), strings.Join(g.Folders, ", "), dash(g.Reason))
 	}
 	for _, o := range rep.Orphans {
-		fmt.Fprintf(w, "orphan\t%s\t-\t-\t%s\t%s\n", o.Dir, o.Dir, o.Reason)
+		_, _ = fmt.Fprintf(w, "orphan\t%s\t-\t-\t%s\t%s\n", o.Dir, o.Dir, o.Reason)
 	}
 	_ = w.Flush()
 
