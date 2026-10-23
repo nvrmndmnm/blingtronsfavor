@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -8,8 +9,7 @@ import (
 	"strings"
 
 	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/installer"
-	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
@@ -46,13 +46,7 @@ func runRemove(args []string, _ BuildInfo) int {
 		return ExitUsage
 	}
 
-	path, err := paths.StateFile()
-	if err != nil {
-		slog.Error("resolve state file", "error", err)
-		return ExitError
-	}
-	in := &installer.Installer{Store: state.Open(path)}
-	if err := in.Remove(flavor, id); err != nil {
+	if err := service.RemoveAddon(context.Background(), flavor, id); err != nil {
 		slog.Error("remove", "addon", id, "error", err)
 		return ExitError
 	}

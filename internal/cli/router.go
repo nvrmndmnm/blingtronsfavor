@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/itp5b5/blessforge/internal/service"
 )
 
 // BuildInfo carries version metadata injected at link time via -ldflags.
@@ -57,6 +58,7 @@ func commands() []command {
 		{name: "sync", short: "sync installed addons with the manifest", run: runSync},
 		{name: "status", short: "show configured addons", run: runStatus},
 		{name: "remove", short: "remove an addon from the manifest", run: runRemove},
+		{name: "tui", short: "open the interactive addon manager", run: runTUI},
 		{name: "version", short: "print version information", run: runVersion},
 	}
 }
@@ -65,6 +67,7 @@ func commands() []command {
 // code.
 func Run(args []string, bi BuildInfo) int {
 	logVerbose, logQuiet = false, false
+	service.ToolVersion = bi.Version
 
 	gfs := flag.NewFlagSet("bfctl", flag.ContinueOnError)
 	gfs.SetOutput(os.Stderr)
@@ -81,6 +84,11 @@ func Run(args []string, bi BuildInfo) int {
 
 	rest := gfs.Args()
 	if len(rest) == 0 {
+		// A bare "bfctl" on a terminal opens the TUI; in scripts and
+		// pipes it falls back to the usage text and exit code 2.
+		if stdoutIsTTY() {
+			return runTUI(nil, bi)
+		}
 		usage(os.Stderr)
 		return ExitUsage
 	}
@@ -92,6 +100,13 @@ func Run(args []string, bi BuildInfo) int {
 	fmt.Fprintf(os.Stderr, "bfctl: unknown command %q\n\n", rest[0])
 	usage(os.Stderr)
 	return ExitUsage
+}
+
+// stdoutIsTTY reports whether standard output is a terminal, which is how a
+// bare "bfctl" decides between the TUI and the usage text.
+func stdoutIsTTY() bool {
+	fi, err := os.Stdout.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // notImplemented reports a subcommand that has a router entry and a skeleton

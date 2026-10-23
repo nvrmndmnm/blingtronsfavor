@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 	"github.com/itp5b5/blessforge/internal/toc"
 )
@@ -23,6 +25,7 @@ func runStatus(args []string, _ BuildInfo) int {
 	scanFlavor := fs.String("flavor", "", "client flavor for --scan: mainline, forever, classic or mists")
 	scanInterface := fs.Int("interface", 0, "client interface number for --scan")
 	offline := fs.Bool("offline", false, "no network access: drop the Upstream column")
+	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -32,7 +35,14 @@ func runStatus(args []string, _ BuildInfo) int {
 		return ExitUsage
 	}
 	if *scanDir != "" {
+		if *jsonOut {
+			fmt.Fprintln(os.Stderr, "bfctl status: --json and --scan cannot be combined")
+			return ExitUsage
+		}
 		return runScan(expandPathFlag("scan", *scanDir), *scanFlavor, *scanInterface)
+	}
+	if *jsonOut {
+		return runStatusJSON()
 	}
 	return runStatusTable(*offline)
 }
@@ -40,22 +50,44 @@ func runStatus(args []string, _ BuildInfo) int {
 // runStatusTable renders the managed addons of every recorded client flavor
 // as one table per flavor.
 func runStatusTable(offline bool) int {
-	st, err := loadState()
+	st, err := service.LoadStatus()
 	if err != nil {
 		slog.Error("read state", "error", err)
 		return ExitError
 	}
-	clients := sortedClients(st)
-	if len(clients) == 0 {
+	if len(st.Clients) == 0 {
 		fmt.Println("no addons configured")
 		return ExitOK
 	}
-	for i, cs := range clients {
+	for i, cs := range st.Clients {
 		if i > 0 {
 			fmt.Println()
 		}
 		printClientStatus(cs, offline)
 	}
+	return ExitOK
+}
+
+// runStatusJSON prints the machine-readable status report: one flat "addons"
+// array plus the per-flavor "clients" grouping, ready for jq.
+func runStatusJSON() int {
+	st, err := service.LoadStatus()
+	if err != nil {
+		slog.Error("read state", "error", err)
+		return ExitError
+	}
+	if st.Clients == nil {
+		st.Clients = []service.ClientRow{}
+	}
+	if st.Addons == nil {
+		st.Addons = []service.AddonRow{}
+	}
+	data, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		slog.Error("encode status JSON", "error", err)
+		return ExitError
+	}
+	fmt.Println(string(data))
 	return ExitOK
 }
 
@@ -66,36 +98,16 @@ func runStatusTable(offline bool) int {
 //
 // The Upstream column (the last upstream tag the resolver saw) is only shown
 // with network access; --offline drops it entirely.
-func printClientStatus(cs *state.ClientState, offline bool) {
-	install, err := client.Detect(cs.Root)
-	if err != nil {
-		slog.Debug("detect recorded client", "root", cs.Root, "error", err)
-	}
-	flavor, iface := cs.Flavor, cs.Interface
-	if install != nil {
-		flavor, iface = install.Flavor, install.Interface
-	}
-	badge := flavor.DisplayName()
-	if iface != 0 {
-		badge = fmt.Sprintf("%s (Interface %d)", badge, iface)
+func printClientStatus(cs service.ClientRow, offline bool) {
+	badge := cs.FlavorName
+	if cs.Interface != 0 {
+		badge = fmt.Sprintf("%s (Interface %d)", badge, cs.Interface)
 	}
 	fmt.Printf("%s — %s\n", badge, cs.Root)
-
-	ids := make([]string, 0, len(cs.Addons))
-	for id := range cs.Addons {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(i, j int) bool { return addonLabel(cs.Addons[ids[i]]) < addonLabel(cs.Addons[ids[j]]) })
-	if len(ids) == 0 {
+	if len(cs.Addons) == 0 {
 		fmt.Println("  no addons installed")
 		return
 	}
-
-	var target *toc.Target
-	if iface != 0 {
-		target = &toc.Target{Flavor: flavor, Interface: iface}
-	}
-	verdicts := tocVerdicts(cs, target)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	if offline {
@@ -103,12 +115,14 @@ func printClientStatus(cs *state.ClientState, offline bool) {
 	} else {
 		_, _ = fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
 	}
-	for _, id := range ids {
-		a := cs.Addons[id]
-		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s",
-			addonLabel(a), addonVersion(a), addonStrategy(a), addonDirs(a), addonTOC(a, verdicts))
+	for _, a := range cs.Addons {
+		dirs := "-"
+		if len(a.Dirs) > 0 {
+			dirs = strings.Join(a.Dirs, ", ")
+		}
+		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s", a.Name, a.Installed, a.Strategy, dirs, a.Status)
 		if !offline {
-			row += "\t" + addonUpstream(a)
+			row += "\t" + a.Upstream
 		}
 		_, _ = fmt.Fprintln(w, row)
 	}
@@ -212,87 +226,4 @@ func sortedClients(st *state.State) []*state.ClientState {
 	}
 	sort.Slice(clients, func(i, j int) bool { return clients[i].Flavor < clients[j].Flavor })
 	return clients
-}
-
-// tocVerdicts scans the client's AddOns directory once and reports the
-// compatibility verdict per addon directory. A missing AddOns directory (or
-// an unmounted install) yields no verdicts.
-func tocVerdicts(cs *state.ClientState, target *toc.Target) map[string]toc.Verdict {
-	addons, err := toc.Scan(cs.AddonsDir(), target)
-	if err != nil {
-		slog.Debug("scan addons", "dir", cs.AddonsDir(), "error", err)
-		return nil
-	}
-	verdicts := make(map[string]toc.Verdict, len(addons))
-	for _, addon := range addons {
-		verdicts[addon.Dir] = addon.Verdict
-	}
-	return verdicts
-}
-
-// addonLabel is the name shown in the Addon column.
-func addonLabel(a *state.AddonState) string {
-	if a.DisplayName != "" {
-		return a.DisplayName
-	}
-	return a.ID
-}
-
-// addonVersion renders the installed version, falling back to the installed
-// commit and finally "-".
-func addonVersion(a *state.AddonState) string {
-	if a.InstalledVersion != "" {
-		return a.InstalledVersion
-	}
-	if a.InstalledCommit != "" {
-		return a.InstalledCommit
-	}
-	return "-"
-}
-
-// addonStrategy renders the install strategy, or "-" when none is recorded.
-func addonStrategy(a *state.AddonState) string {
-	if a.Strategy == "" {
-		return "-"
-	}
-	return string(a.Strategy)
-}
-
-// addonDirs renders the directories the addon owns inside Interface/AddOns.
-func addonDirs(a *state.AddonState) string {
-	if len(a.OwnedDirs) == 0 {
-		return "-"
-	}
-	return strings.Join(a.OwnedDirs, ", ")
-}
-
-// addonTOC renders the TOC compatibility of one addon: the worst verdict
-// across its owned directories, so one broken directory cannot hide. A
-// missing owned directory is the most severe finding ("Missing"); an addon
-// without owned directories renders "-".
-func addonTOC(a *state.AddonState, verdicts map[string]toc.Verdict) string {
-	if len(a.OwnedDirs) == 0 {
-		return "-"
-	}
-	worst := toc.VerdictMatch
-	for _, dir := range a.OwnedDirs {
-		v, ok := verdicts[dir]
-		if !ok {
-			return "Missing"
-		}
-		if v > worst {
-			worst = v
-		}
-	}
-	return worst.String()
-}
-
-// addonUpstream renders the last upstream tag the resolver recorded. Live
-// upstream lookups land with the ETag resolver; until then this is the
-// resolver's last-seen tag from the state.
-func addonUpstream(a *state.AddonState) string {
-	if a.ETag != "" {
-		return a.ETag
-	}
-	return "-"
 }
