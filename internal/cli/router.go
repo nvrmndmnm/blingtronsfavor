@@ -109,13 +109,6 @@ func stdoutIsTTY() bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// notImplemented reports a subcommand that has a router entry and a skeleton
-// handler but whose real behaviour lands in a later milestone.
-func notImplemented(name string) int {
-	fmt.Fprintf(os.Stderr, "bfctl: %s is not implemented yet\n", name)
-	return ExitError
-}
-
 func registerLogFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&logVerbose, "verbose", false, "enable debug logging")
 	fs.BoolVar(&logQuiet, "quiet", false, "only log errors")

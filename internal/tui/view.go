@@ -63,7 +63,7 @@ func (m Model) render() string {
 		b.WriteString("\n")
 	}
 	if m.filtering || m.filter != "" {
-		b.WriteString(fmt.Sprintf("filter: %s▌\n", m.filter))
+		fmt.Fprintf(&b, "filter: %s▌\n", m.filter)
 	}
 	b.WriteString(m.statusBar())
 	b.WriteString("\n")
