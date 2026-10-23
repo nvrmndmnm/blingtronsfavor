@@ -1,0 +1,4 @@
+## Interface: 120100
+## Title: Mystery Addon
+## Version: 0.9.0
+MysteryAddon.lua

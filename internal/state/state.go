@@ -114,6 +114,11 @@ const (
 	SourceGit    SourceKind = "git"
 	SourceTukui  SourceKind = "tukui"
 	SourceWoWI   SourceKind = "wowi"
+
+	// SourceManual marks an addon installed by a foreign tool that bfctl
+	// tracks but never touches: "bfctl sync" skips it until the user binds
+	// it to a real source ("bfctl adopt --bind").
+	SourceManual SourceKind = "manual"
 )
 
 // SourceRef points at an addon's upstream. URL is the clone/API URL and Slug
@@ -132,6 +137,7 @@ const (
 	StrategyRelease       Strategy = "release"        // a GitHub release asset
 	StrategySourcePkgmeta Strategy = "source-pkgmeta" // local build from source with .pkgmeta
 	StrategyDirect        Strategy = "direct"         // provider download or plain git
+	StrategyManual        Strategy = "manual"         // installed by a foreign tool, never touched by sync
 )
 
 // AddonState tracks one managed addon inside one client flavor.

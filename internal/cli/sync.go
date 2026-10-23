@@ -26,6 +26,7 @@ type syncTask struct {
 type resolveResult struct {
 	plan resolver.Plan
 	err  error
+	skip string // non-empty: nothing to resolve (manual entry from "bfctl adopt")
 }
 
 // runSync implements "bfctl sync": it resolves every managed addon against
@@ -33,7 +34,9 @@ type resolveResult struct {
 // atomically. It exits 0 when every addon is clean, 4 on partial failure.
 // Repositories whose plan needs a source build report "source build
 // required" and are skipped cleanly until source builds land (M4); only
-// --strict turns that deferral into a partial failure.
+// --strict turns that deferral into a partial failure. Manual entries
+// recorded by "bfctl adopt" are never resolved or touched — they are
+// reported as skipped until they are re-bound with "bfctl adopt --bind".
 func runSync(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("sync")
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
@@ -72,11 +75,16 @@ func runSync(args []string, bi BuildInfo) int {
 	ctx := context.Background()
 	results := resolveAll(ctx, res, tasks, *workers, cfg)
 
-	var upToDate, updates, updated, sourceBuild, failed int
+	var upToDate, updates, updated, sourceBuild, skipped, failed int
 	var rateHint string
 	for i, task := range tasks {
 		label := fmt.Sprintf("%s/%s", task.flavor, task.addon.ID)
 		result := results[i]
+		if result.skip != "" {
+			fmt.Printf("%s: skipped: %s\n", label, result.skip)
+			skipped++
+			continue
+		}
 		if result.err != nil {
 			fmt.Printf("%s: error: %v\n", label, result.err)
 			if h, ok := github.RateLimitHint(result.err); ok && rateHint == "" {
@@ -121,6 +129,9 @@ func runSync(args []string, bi BuildInfo) int {
 	}
 	if sourceBuild > 0 {
 		summary += fmt.Sprintf(", %d source build required", sourceBuild)
+	}
+	if skipped > 0 {
+		summary += fmt.Sprintf(", %d manual skipped", skipped)
 	}
 	if failed > 0 {
 		summary += fmt.Sprintf(", %d failed", failed)
@@ -192,6 +203,10 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 	var wg sync.WaitGroup
 	for i := range tasks {
 		task := tasks[i]
+		if task.addon.Source.Kind == state.SourceManual || task.addon.Strategy == state.StrategyManual {
+			results[i].skip = "installed by a foreign tool (re-bind with \"bfctl adopt --bind\" to manage it)"
+			continue
+		}
 		if task.addon.Source.Kind != state.SourceGitHub {
 			results[i].err = fmt.Errorf("unsupported source kind %q (only github resolution is implemented)", task.addon.Source.Kind)
 			continue

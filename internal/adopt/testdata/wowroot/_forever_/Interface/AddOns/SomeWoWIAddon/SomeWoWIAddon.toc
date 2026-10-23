@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Some WoWI Addon
+## Version: 3.2.1
+## X-WoWI-ID: 24910
+SomeWoWIAddon.lua
