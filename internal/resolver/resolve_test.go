@@ -172,7 +172,7 @@ const metaUniversal = `{
         {"flavor": "forever", "interface": 16001}
       ]
     }
-  }
+  ]
 }`
 
 // releasesHeuristic is a recorded release without release.json: selection
@@ -305,6 +305,23 @@ const releasesForeignOnly = `[
     ]
   }
 ]`
+
+// TestRecordedMetaFixturesParse guards the recorded release.json payloads
+// against transcription errors: ParseMeta fails soft in production (a
+// malformed metadata asset falls back to zip-name heuristics), so a broken
+// fixture would surface as a confusing resolution failure instead of a parse
+// error.
+func TestRecordedMetaFixturesParse(t *testing.T) {
+	for name, body := range map[string]string{
+		"metaMultiFlavor": metaMultiFlavor,
+		"metaAliasForms":  metaAliasForms,
+		"metaUniversal":   metaUniversal,
+	} {
+		if _, err := ParseMeta([]byte(body)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
 
 // ---- resolution tests ----
 
