@@ -41,8 +41,8 @@ type deleteMsg struct {
 }
 
 // Init satisfies tea.Model.
-func (m Model) Init() (tea.Model, tea.Cmd) {
-	return m, nil
+func (m Model) Init() tea.Cmd {
+	return nil
 }
 
 // Update satisfies tea.Model. Service work runs as commands; goroutines
