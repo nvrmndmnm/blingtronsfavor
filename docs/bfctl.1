@@ -1,0 +1,218 @@
+.Dd October 26, 2025
+.Dt BFCTL 1
+.Os
+.Sh NAME
+.Nm bfctl
+.Nd manage World of Warcraft addons reproducibly
+.Sh SYNOPSIS
+.Nm
+.Cm init
+.Fl -path Ar root
+.Nm
+.Cm add Ar repo Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force
+.Nm
+.Cm remove Ar id Op Fl -flavor Ar flavor
+.Nm
+.Cm sync
+.Op Fl -check-only
+.Op Fl -workers Ar n
+.Op Fl -explain
+.Op Fl -strict
+.Op Fl -json
+.Nm
+.Cm status
+.Op Fl -json
+.Op Fl -offline
+.Nm
+.Cm status
+.Fl -scan Ar dir
+.Op Fl -flavor Ar flavor Fl -interface Ar number
+.Nm
+.Cm tui
+.Nm
+.Cm version
+.Sh DESCRIPTION
+.Nm
+is a reproducible, offline-friendly World of Warcraft addon manager for
+Linux clients.
+It discovers client flavors
+.Pq mainline, forever, classic, mists ,
+tracks addons by GitHub repository
+.Pq stable releases, a branch, or a pinned release or tag ,
+installs them atomically through a transactional installer with rollback,
+and resolves multi-TOC layouts with the packaging rules used upstream
+.Pq .pkgmeta, -classic/-bcc/-wrath suffixes .
+.Pp
+A bare
+.Nm
+on a terminal opens the interactive manager; in scripts and pipes it prints
+the usage text and exits 2.
+Use
+.Cm tui
+to open the UI explicitly.
+.Pp
+Global flags:
+.Fl v , -verbose
+raise log detail,
+.Fl q , -quiet
+silences normal logging.
+.Sh COMMANDS
+.Bl -tag -width "status"
+.It Cm init Fl -path Ar root
+Create the
+.Nm
+configuration layout and register the client flavor installed under
+.Ar root ,
+for example
+.Pa ~/Games/World of Warcraft/_forever_ .
+.It Cm add Ar repo
+Add and install an addon from a GitHub repository
+.Pq Ar owner/repo
+or a full URL.
+.Fl -branch Ar branch
+tracks a development branch instead of stable releases;
+.Fl -strategy Cm release
+pins to GitHub releases and silences the staleness detector.
+.Fl -flavor
+selects the client when several are configured.
+.Fl -force
+takes over addon directories owned by another addon.
+.It Cm remove Ar id
+Remove the addon's owned directories and drop its manifest entry, atomically.
+.It Cm adopt
+Take over an existing addon installation: bind its directories to bfctl
+management, or re-bind an addon installed by a foreign tool.
+.It Cm sync
+Resolve every managed addon against its upstream and install updates.
+Never prompts: suitable for launch scripts and cron.
+.Fl -check-only
+reports without downloading,
+.Fl -workers
+bounds concurrent resolutions
+.Pq default 4 ,
+.Fl -explain
+annotates the resolution reason of each plan,
+.Fl -strict
+treats source builds as failures,
+.Fl -json
+prints a machine-readable report.
+.It Cm status
+Show one table per client flavor:
+Addons, installed versions, strategies, owned directories, TOC
+compatibility and the last upstream tag.
+.Fl -json
+prints a machine-readable report,
+.Fl -offline
+drops the Upstream column.
+.Fl -scan Ar dir
+lists a bare AddOns directory with its selected .toc files and compatibility
+verdicts
+.Pq Fl -flavor Ns / Ns Fl -interface pin the target client .
+.It Cm tui
+Open the interactive addon manager: an addon table
+.Pq Addon, Installed, Upstream, Strategy, Status
+with a flavor badge
+.Pq e.g. Forever 1.60.1 ,
+a detail pane and a progress spinner.
+Keys:
+.Ar u
+update all,
+.Ar s
+toggle release/branch tracking,
+.Ar d
+delete with confirmation,
+.Ar enter
+detail pane,
+.Ar /
+filter,
+.Ar q
+quit.
+A running update is cancelled
+.Pq with rollback
+before quit.
+.It Cm version
+Print version information.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width 4
+.It 0
+Success.
+.It 1
+Runtime failure, or an interrupted sync
+.Pq its in-flight install was rolled back .
+.It 2
+Usage error.
+.It 4
+.Pq Cm sync
+partial failure: some addons failed
+.Pq or, with Fl -strict , deferred to a source build .
+.El
+.Sh JSON OUTPUT
+.Cm status Fl -json
+prints an object with a flat
+.Va addons
+array and a
+.Va clients
+grouping; each addon carries
+.Va flavor , id , name , installed , upstream , strategy , tracking , status , dirs , sourceKind , source .
+.Cm sync Fl -json
+prints
+.Va results
+per addon
+.Pq Va flavor , addon , status , from , to , reason , error
+and an aggregate
+.Va summary .
+Both are stable interfaces intended for
+.Xr jq 1 .
+.Sh SIGNALS
+.Bl -tag -width SIGINT
+.It Dv SIGINT
+Cancels an in-flight sync
+.Pq or an in-flight TUI update
+through the installer's rollback: completed work is kept, the interrupted
+install is rolled back and
+.Nm
+exits 1.
+.El
+.Sh FILES
+.Bl -tag -width "~/.config/bfctl/state.json"
+.It Pa ~/.config/bfctl/state.json
+Lock-protected manifest: tracked addons, sources, strategies.
+.It Pa ~/.config/bfctl/config.yaml
+Optional user configuration
+.Pq e.g. staleness_days .
+.It Pa ~/.cache/bfctl
+Resolved metadata cache
+.Pq content-addressed blobs and unpacked trees .
+.El
+.Sh ENVIRONMENT
+.Bl -tag -width GH_TOKEN
+.It Ev GH_TOKEN , GITHUB_TOKEN
+Optional GitHub token raising API rate limits.
+Never written to logs or state.
+.It Ev XDG_CONFIG_HOME , XDG_CACHE_HOME , BFCTL_CONFIG_HOME , BFCTL_CACHE_HOME
+Override the default directories.
+.El
+.Sh EXAMPLES
+Register the
+.Em forever
+flavor and track a stable-release addon:
+.Bd -literal -offset indent
+bfctl init --path ~/Games/World of Warcraft/_forever_
+bfctl add owner/repo
+bfctl sync --check-only
+bfctl status
+.Ed
+.Pp
+JSON for scripting:
+.Bd -literal -offset indent
+bfctl status --json | jq -r '.addons[] | [.name, .status] | @tsv'
+.Ed
+.Pp
+Launch script
+.Pq no prompts, deterministic exit codes :
+.Bd -literal -offset indent
+bfctl sync --workers 4 || case $? in 4) echo "partial failure" ;; *) exit ;; esac
+.Ed
+.Sh SEE ALSO
+.Xr dwarves 7

@@ -1,0 +1,57 @@
+#compdef bfctl
+# zsh completion for bfctl — install as
+# /usr/share/zsh/site-functions/_bfctl
+
+_bfctl() {
+	local -a cmds
+	cmds=(
+		'init:create the bfctl configuration and state'
+		'adopt:adopt an existing addon into bfctl management'
+		'add:add an addon to the manifest'
+		'sync:sync installed addons with the manifest'
+		'status:show configured addons'
+		'remove:remove an addon from the manifest'
+		'tui:open the interactive addon manager'
+		'version:print version information'
+	)
+
+	if (( CURRENT == 2 )); then
+		_describe 'command' cmds
+		return
+	fi
+
+	local flavor_opts=( mainline forever classic mists )
+	case "${words[2]}" in
+	sync)
+		_arguments \
+			'--check-only[resolve and report only]' \
+			'--workers[number of concurrent resolutions]' \
+			'--explain[show why each plan was selected]' \
+			'--strict[treat source builds as failures]' \
+			'--json[machine-readable JSON report]'
+		;;
+	status)
+		_arguments \
+			'--json[machine-readable JSON report]' \
+			'--offline[drop the Upstream column]' \
+			'--scan[scan an AddOns directory]:directory:_files/' \
+			'--flavor[client flavor for --scan]:flavor:('"$flavor_opts"')' \
+			'--interface[client interface number for --scan]'
+		;;
+	add)
+		_arguments \
+			'--branch[branch to track instead of stable releases]' \
+			'--strategy[install strategy pin]:strategy:(release)' \
+			'--flavor[client flavor]:flavor:('"$flavor_opts"')' \
+			'--force[take over addon directories owned by another addon]' \
+			'--explain[show why the plan was selected]'
+		;;
+	remove)
+		_arguments '--flavor[client flavor]:flavor:('"$flavor_opts"')'
+		;;
+	init)
+		_arguments '--path[client flavor directory]:directory:_files/'
+		;;
+	esac
+}
+_bfctl "$@"

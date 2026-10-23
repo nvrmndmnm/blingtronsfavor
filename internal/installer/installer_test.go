@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -164,7 +165,7 @@ func TestAtomicInstallUpgradeIntegration(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: srcV1,
 	}
-	if err := in.Install(req); err != nil {
+	if err := in.Install(context.Background(), req); err != nil {
 		t.Fatalf("install v1: %v", err)
 	}
 
@@ -184,7 +185,7 @@ func TestAtomicInstallUpgradeIntegration(t *testing.T) {
 	srcV2 := filepath.Join(t.TempDir(), "v2")
 	writePayload(t, srcV2, "v2", "DemoAddon", "DemoAddon_Data")
 	req.SourceDir = srcV2
-	if err := in.Install(req); err != nil {
+	if err := in.Install(context.Background(), req); err != nil {
 		t.Fatalf("install v2: %v", err)
 	}
 
@@ -225,7 +226,7 @@ func TestAtomicRollbackRestoresPriorTree(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: srcV1,
 	}
-	if err := in.Install(req); err != nil {
+	if err := in.Install(context.Background(), req); err != nil {
 		t.Fatalf("install v1: %v", err)
 	}
 	before := readTree(t, addonsDir)
@@ -234,7 +235,7 @@ func TestAtomicRollbackRestoresPriorTree(t *testing.T) {
 	srcV2 := filepath.Join(t.TempDir(), "v2")
 	writePayload(t, srcV2, "v2", "DemoAddon", "DemoAddon_Data")
 	req.SourceDir = srcV2
-	err := in.Install(req)
+	err := in.Install(context.Background(), req)
 	if err == nil {
 		t.Fatal("install with simulated failure: succeeded, want error")
 	}
@@ -274,7 +275,7 @@ func TestAtomicConflictPolicy(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: src,
 	}
-	err := in.Install(req)
+	err := in.Install(context.Background(), req)
 	if err == nil {
 		t.Fatal("install over a foreign folder: succeeded, want refusal")
 	}
@@ -289,7 +290,7 @@ func TestAtomicConflictPolicy(t *testing.T) {
 
 	// With --force the folder is taken over.
 	req.Force = true
-	if err := in.Install(req); err != nil {
+	if err := in.Install(context.Background(), req); err != nil {
 		t.Fatalf("install with --force: %v", err)
 	}
 	a := loadAddon(t, store, flavor, "DemoAddon")
@@ -319,11 +320,11 @@ func TestAtomicRemoveAddon(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: src,
 	}
-	if err := in.Install(req); err != nil {
+	if err := in.Install(context.Background(), req); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
-	if err := in.Remove(flavor, "DemoAddon"); err != nil {
+	if err := in.Remove(context.Background(), flavor, "DemoAddon"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if got := dirNames(t, addonsDir); len(got) != 0 {
@@ -353,7 +354,7 @@ func TestAtomicRejectsSymlinkPayload(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: src,
 	}
-	err := in.Install(req)
+	err := in.Install(context.Background(), req)
 	if err == nil {
 		t.Fatal("install with a symlink payload: succeeded, want rejection")
 	}
@@ -386,7 +387,7 @@ func TestAtomicRejectsMismatchedToc(t *testing.T) {
 		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
 		SourceDir: src,
 	}
-	err := in.Install(req)
+	err := in.Install(context.Background(), req)
 	if err == nil {
 		t.Fatal("install with a mismatched .toc: succeeded, want rejection")
 	}
@@ -515,5 +516,57 @@ func TestAtomicReconcileCommitCompletes(t *testing.T) {
 	}
 	if left := dirNames(t, trashRoot); len(left) != 0 {
 		t.Fatalf("after reconcile: trash holds %v, want nothing", left)
+	}
+}
+
+// TestInstallCancelMidSwapRollsBack is the SIGINT acceptance test: a context
+// cancelled in the middle of a swap (right after the first directory move)
+// must abort through the rollback and leave Interface/AddOns and state.json
+// exactly as they were before the upgrade attempt.
+func TestInstallCancelMidSwapRollsBack(t *testing.T) {
+	in, store, flavor, root := testSetup(t)
+	addonsDir := filepath.Join(root, "Interface", "AddOns")
+
+	srcV1 := filepath.Join(t.TempDir(), "v1")
+	writePayload(t, srcV1, "v1", "DemoAddon", "DemoAddon_Config", "DemoAddon_Data")
+	if err := in.Install(context.Background(), Request{
+		Flavor:    flavor,
+		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
+		SourceDir: srcV1,
+	}); err != nil {
+		t.Fatalf("install v1: %v", err)
+	}
+	before := readTree(t, addonsDir)
+	beforeAddon := loadAddon(t, store, flavor, "DemoAddon")
+
+	srcV2 := filepath.Join(t.TempDir(), "v2")
+	writePayload(t, srcV2, "v2", "DemoAddon", "DemoAddon_Config")
+	ctx, cancel := context.WithCancel(context.Background())
+	in.afterMove = cancel // cancel right after the first move of the swap
+	err := in.Install(ctx, Request{
+		Flavor:    flavor,
+		Addon:     state.AddonState{ID: "DemoAddon", Strategy: state.StrategyRelease},
+		SourceDir: srcV2,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled upgrade: err = %v, want context.Canceled", err)
+	}
+
+	if after := readTree(t, addonsDir); !reflect.DeepEqual(after, before) {
+		t.Fatalf("after cancelled upgrade: tree = %v, want exact prior tree %v", after, before)
+	}
+	a := loadAddon(t, store, flavor, "DemoAddon")
+	if !slices.Equal(a.OwnedDirs, beforeAddon.OwnedDirs) {
+		t.Fatalf("after cancelled upgrade: owned dirs = %v, want %v", a.OwnedDirs, beforeAddon.OwnedDirs)
+	}
+	if a.InstalledVersion != beforeAddon.InstalledVersion {
+		t.Fatalf("after cancelled upgrade: installed version = %q, want %q", a.InstalledVersion, beforeAddon.InstalledVersion)
+	}
+	trashRoot, err := paths.CacheSubdir("trash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left := dirNames(t, trashRoot); len(left) != 0 {
+		t.Fatalf("after cancelled upgrade: trash holds %v, want nothing", left)
 	}
 }

@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -41,15 +42,24 @@ type Installer struct {
 	// error after the trash moves and before any staged directory is
 	// renamed into Interface/AddOns, exercising the rollback path.
 	failBeforeSwap error
+
+	// afterMove is a test hook called after every directory move of a
+	// swap; tests use it to cancel the context mid-transaction and
+	// exercise the rollback path deterministically.
+	afterMove func()
 }
 
 // Install installs the request's payload into the client's Interface/AddOns
 // and records it in the state file, atomically: stage and validate the
 // payload, move the addon's old directories into the transaction trash,
 // rename the staged directories into place, write state.json and only then
-// purge the trash. Any failure rolls the tree back to its exact prior
-// contents.
-func (in *Installer) Install(req Request) error {
+// purge the trash. Any failure — including a cancelled context — rolls the
+// tree back to its exact prior contents: a SIGINT during "bfctl sync" aborts
+// cleanly through this rollback.
+func (in *Installer) Install(ctx context.Context, req Request) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("install %s: %w", req.Addon.ID, err)
+	}
 	if req.Addon.ID == "" {
 		return errors.New("install: addon ID is required")
 	}
@@ -121,7 +131,7 @@ func (in *Installer) Install(req Request) error {
 	if err != nil {
 		return err
 	}
-	if err := in.swap(t, trashSet, names); err != nil {
+	if err := in.swap(ctx, t, trashSet, names); err != nil {
 		return errors.Join(err, abort(t))
 	}
 
@@ -146,8 +156,12 @@ func (in *Installer) Install(req Request) error {
 }
 
 // Remove trashes the addon's owned directories and drops its state entry,
-// atomically and with the same rollback guarantees as Install.
-func (in *Installer) Remove(flavor client.Flavor, id string) error {
+// atomically and with the same rollback guarantees as Install. A cancelled
+// context aborts through the same rollback.
+func (in *Installer) Remove(ctx context.Context, flavor client.Flavor, id string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("remove %s: %w", id, err)
+	}
 	if id == "" {
 		return errors.New("remove: addon ID is required")
 	}
@@ -228,21 +242,36 @@ func (in *Installer) Remove(flavor client.Flavor, id string) error {
 // makes rollback (and case-only renames on ext4/btrfs) exact: by the time a
 // staged directory lands, its predecessor is already out of the way and
 // recoverable.
-func (in *Installer) swap(t *txn, trashSet, names []string) error {
+func (in *Installer) swap(ctx context.Context, t *txn, trashSet, names []string) error {
 	for _, name := range trashSet {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := t.trash(name); err != nil {
 			return err
 		}
+		in.moved()
 	}
 	if in.failBeforeSwap != nil {
 		return fmt.Errorf("simulated failure before swap: %w", in.failBeforeSwap)
 	}
 	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := t.install(name); err != nil {
 			return err
 		}
+		in.moved()
 	}
 	return nil
+}
+
+// moved fires the afterMove test hook, if one is set.
+func (in *Installer) moved() {
+	if in.afterMove != nil {
+		in.afterMove()
+	}
 }
 
 // planSwap computes which existing directories must move to the trash before
