@@ -171,7 +171,7 @@ func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, p
 		return err
 	}
 	in := &installer.Installer{Store: state.Open(statePath)}
-	return in.Install(installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
+	return in.Install(ctx, installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
 }
 
 // collectTasks lists every managed addon of every recorded client flavor,
