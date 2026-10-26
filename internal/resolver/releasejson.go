@@ -30,29 +30,6 @@ type MetaEntry struct {
 	URL       string
 }
 
-// flavorAliases maps normalized release.json flavor keys to client flavors.
-// Which key the Forever flavor uses (camelot? forever?) is risk R4 of the
-// plan: the recorded DeadlyBossMods release.json sample uses "forever", and
-// the camelot spelling (with the packager's retail/vanilla/mop aliases) stays
-// accepted alongside it so no other packager output locks us out.
-var flavorAliases = map[string]client.Flavor{
-	"mainline":          client.FlavorMainline,
-	"retail":            client.FlavorMainline,
-	"main":              client.FlavorMainline,
-	"classic":           client.FlavorClassic,
-	"vanilla":           client.FlavorClassic,
-	"era":               client.FlavorClassic,
-	"classic_era":       client.FlavorClassic,
-	"mists":             client.FlavorMists,
-	"mop":               client.FlavorMists,
-	"pandaria":          client.FlavorMists,
-	"mists_of_pandaria": client.FlavorMists,
-	"forever":           client.FlavorForever,
-	"camelot":           client.FlavorForever,
-	"wow_forever":       client.FlavorForever,
-	"wow_camelot":       client.FlavorForever,
-}
-
 // foreignFlavorKeys are flavor spellings of client flavors bfctl does not
 // support (Classic progression flavors). Assets tagged with them belong to
 // another flavor and must never be selected as a fallback.
@@ -81,10 +58,13 @@ func normalizeFlavorKey(s string) string {
 	return strings.Trim(s, "_")
 }
 
-// flavorForKey maps one metadata flavor key to a client flavor.
+// flavorForKey maps one metadata flavor key to a client flavor. The alias
+// table lives in package client — plan risk R4: "forever" and "camelot" name
+// the same client and are used interchangeably (the recorded DeadlyBossMods
+// release.json says "forever", Details ships "Details_Camelot.toc"), so
+// metadata keys, zip-name flavor tags and CLI flags all fold one way.
 func flavorForKey(s string) (client.Flavor, bool) {
-	f, ok := flavorAliases[normalizeFlavorKey(s)]
-	return f, ok
+	return client.FlavorForKey(s)
 }
 
 // isForeignFlavor reports whether s names a flavor bfctl does not support.

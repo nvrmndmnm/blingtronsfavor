@@ -33,7 +33,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("add")
 	branchFlag := fs.String("branch", "", "branch to track instead of stable releases")
 	strategyFlag := fs.String("strategy", "", "install strategy pin: \"release\" pins to GitHub releases and silences the staleness detector")
-	flavorFlag := fs.String("flavor", "", "client flavor to install for: mainline, forever, classic or mists (required when several are configured)")
+	flavorFlag := fs.String("flavor", "", "client flavor to install for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
 	forceFlag := fs.Bool("force", false, "take over addon directories owned by another addon")
 	explainFlag := fs.Bool("explain", false, "show why the plan was selected")
 	if code, ok := parseSubcommand(fs, args); !ok {
@@ -198,11 +198,9 @@ func targetFlavor(flavorFlag string) (client.Flavor, error) {
 		return "", fmt.Errorf("read state: %w", err)
 	}
 	if flavorFlag != "" {
-		flavor := client.Flavor(flavorFlag)
-		switch flavor {
-		case client.FlavorMainline, client.FlavorForever, client.FlavorClassic, client.FlavorMists:
-		default:
-			return "", fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists)", flavorFlag)
+		flavor, ok := client.FlavorForKey(flavorFlag)
+		if !ok {
+			return "", fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists; \"camelot\" is an accepted spelling of forever)", flavorFlag)
 		}
 		if st.Client(flavor) == nil {
 			return "", fmt.Errorf("no client configured for flavor %s: run \"bfctl init\" first", flavor)
