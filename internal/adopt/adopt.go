@@ -233,7 +233,8 @@ func propose(folders []*folder, table []KnownAddon, opts Options) *Group {
 //  3. an explicit X-Repository / X-Website git URL (GitHub -> source kind
 //     github, other forges -> git-direct);
 //  4. an X-WoWI-ID -> the WoWInterface provider;
-//  5. nothing matched -> a manual entry.
+//  5. an X-Wago-ID -> the Wago Addons provider;
+//  6. nothing matched -> a manual entry.
 func resolveSource(folders []*folder, table []KnownAddon, bind map[string]string) (state.SourceRef, state.Strategy, string, []string) {
 	var notes []string
 
@@ -306,7 +307,16 @@ func resolveSource(folders []*folder, table []KnownAddon, bind map[string]string
 		}
 	}
 
-	// 5. nothing matched.
+	// 5. Wago Addons project ID — the short ID or the legacy numeric ID
+	// both work as the Wago provider's URL key.
+	for _, f := range folders {
+		if f.toc.WagoID != "" {
+			return state.SourceRef{Kind: state.SourceWago, Slug: f.toc.WagoID}, state.StrategyDirect,
+				"X-Wago-ID " + f.toc.WagoID, notes
+		}
+	}
+
+	// 6. nothing matched.
 	ids := unknownIDs(folders)
 	reason = "no upstream found"
 	if ids != "" {
@@ -482,15 +492,16 @@ func manualRef(primary *folder) state.SourceRef {
 	return state.SourceRef{Kind: state.SourceManual, Slug: primary.name}
 }
 
-// unknownIDs summarizes the unbound project IDs of a family for the reason
-// column, e.g. "curse 8315, wago 1234".
+// unknownIDs summarizes the project IDs of a family that bfctl has no
+// provider for (the Curse provider is still a stub) for the reason column,
+// e.g. "curse 8315". Wago IDs are bindable and bound, so they never show up
+// here.
 func unknownIDs(folders []*folder) string {
 	var parts []string
 	seen := make(map[string]bool)
 	for _, f := range folders {
 		for _, pair := range [][2]string{
 			{"curse", f.toc.CurseProjectID},
-			{"wago", f.toc.WagoID},
 		} {
 			if pair[1] == "" || seen[pair[0]+pair[1]] {
 				continue
