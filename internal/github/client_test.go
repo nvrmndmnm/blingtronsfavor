@@ -21,10 +21,11 @@ type requestLog struct {
 }
 
 type loggedRequest struct {
-	path        string
-	ifNoneMatch string
-	accept      string
-	userAgent   string
+	path          string
+	ifNoneMatch   string
+	accept        string
+	userAgent     string
+	authorization string
 }
 
 // add records r and returns its 1-based sequence number.
@@ -32,10 +33,11 @@ func (l *requestLog) add(r *http.Request) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.reqs = append(l.reqs, loggedRequest{
-		path:        r.URL.String(),
-		ifNoneMatch: r.Header.Get("If-None-Match"),
-		accept:      r.Header.Get("Accept"),
-		userAgent:   r.Header.Get("User-Agent"),
+		path:          r.URL.String(),
+		ifNoneMatch:   r.Header.Get("If-None-Match"),
+		accept:        r.Header.Get("Accept"),
+		userAgent:     r.Header.Get("User-Agent"),
+		authorization: r.Header.Get("Authorization"),
 	})
 	return len(l.reqs)
 }
@@ -80,6 +82,65 @@ func cachedEntryAt(t *testing.T, dir, rawURL string) *cacheEntry {
 		t.Fatalf("no cache entry for %s", rawURL)
 	}
 	return e
+}
+
+// TestAuthorizationHeader asserts a configured token rides on every request
+// as a Bearer header and that no Authorization header is sent without one.
+func TestAuthorizationHeader(t *testing.T) {
+	const body = `[{"tag_name":"v1.0.0","published_at":"2026-01-02T03:04:05Z"}]`
+	log := &requestLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.add(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	c, err := New(Options{BaseURL: srv.URL, CacheDir: t.TempDir(), Version: "test", Token: "ghp_secret"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.Releases(context.Background(), testOwner, testRepo); err != nil {
+		t.Fatalf("Releases with token: %v", err)
+	}
+	reqs := log.snapshot()
+	if len(reqs) != 1 {
+		t.Fatalf("server saw %d requests, want 1", len(reqs))
+	}
+	if reqs[0].authorization != "Bearer ghp_secret" {
+		t.Errorf("Authorization = %q, want %q", reqs[0].authorization, "Bearer ghp_secret")
+	}
+
+	c, err = New(Options{BaseURL: srv.URL, CacheDir: t.TempDir(), Version: "test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.Releases(context.Background(), testOwner, testRepo); err != nil {
+		t.Fatalf("Releases without token: %v", err)
+	}
+	reqs = log.snapshot()
+	if reqs[len(reqs)-1].authorization != "" {
+		t.Errorf("Authorization = %q without a token, want empty", reqs[len(reqs)-1].authorization)
+	}
+}
+
+// TestTokenFromEnv covers the GH_TOKEN / GITHUB_TOKEN precedence and the
+// whitespace trimming that keeps a stray newline out of the header.
+func TestTokenFromEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ght-fallback")
+	t.Setenv("GH_TOKEN", "  ghp-first\n")
+	if got := TokenFromEnv(); got != "ghp-first" {
+		t.Errorf("TokenFromEnv with both set = %q, want %q", got, "ghp-first")
+	}
+	t.Setenv("GH_TOKEN", "  ")
+	if got := TokenFromEnv(); got != "ght-fallback" {
+		t.Errorf("TokenFromEnv with blank GH_TOKEN = %q, want %q", got, "ght-fallback")
+	}
+	t.Setenv("GITHUB_TOKEN", "")
+	if got := TokenFromEnv(); got != "" {
+		t.Errorf("TokenFromEnv with neither set = %q, want empty", got)
+	}
 }
 
 // TestETagCacheStoresOn200 covers the first leg of the cache flow: a 200 is

@@ -1,6 +1,7 @@
 package toc
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -117,6 +118,27 @@ func TestSelectAndVerdict(t *testing.T) {
 				t.Errorf("verdict = %v, want %v", got, tt.wantVerdict)
 			}
 		})
+	}
+}
+
+func TestSelectCaseInsensitiveSuffix(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("Addon.toc", "## Interface: 120105\n")
+	write("Addon_camelot.toc", "## Interface: 16001\n")
+	selected, err := Select(dir, client.FlavorForever)
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if selected == nil || filepath.Base(selected.Path) != "Addon_camelot.toc" {
+		t.Fatalf("selected toc = %v, want Addon_camelot.toc", selected)
+	}
+	if got := verdictFor(selected, &Target{Flavor: client.FlavorForever, Interface: 16001}); got != VerdictMatch {
+		t.Errorf("verdict = %v, want %v", got, VerdictMatch)
 	}
 }
 

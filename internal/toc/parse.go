@@ -59,11 +59,13 @@ func Parse(path string) (*Toc, error) {
 }
 
 // splitName splits a toc base name into the addon name and its flavor suffix,
-// e.g. "DeadlyBossMods_Mainline" -> ("DeadlyBossMods", "_Mainline").
+// e.g. "DeadlyBossMods_Mainline" -> ("DeadlyBossMods", "_Mainline"). The
+// suffix is matched case-insensitively and returned in its canonical
+// spelling: "_camelot" and "_CAMELOT" are the "_Camelot" flavor suffix.
 func splitName(base string) (name, suffix string) {
 	for _, suf := range knownSuffixes {
-		if strings.HasSuffix(base, suf) {
-			return strings.TrimSuffix(base, suf), suf
+		if len(base) >= len(suf) && strings.EqualFold(base[len(base)-len(suf):], suf) {
+			return base[:len(base)-len(suf)], suf
 		}
 	}
 	return base, ""

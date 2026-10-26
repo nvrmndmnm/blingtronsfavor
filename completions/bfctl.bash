@@ -29,7 +29,7 @@ _bfctl() {
 
 	case "${COMP_WORDS[1]}" in
 	sync)
-		COMPREPLY=( $(compgen -W "--check-only --workers --explain --strict --json --verbose --quiet" -- "$cur") )
+		COMPREPLY=( $(compgen -W "--check-only --workers --explain --json --verbose --quiet" -- "$cur") )
 		;;
 	status)
 		COMPREPLY=( $(compgen -W "--json --offline --scan --flavor --interface --verbose --quiet" -- "$cur") )

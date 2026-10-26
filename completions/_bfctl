@@ -27,7 +27,6 @@ _bfctl() {
 			'--check-only[resolve and report only]' \
 			'--workers[number of concurrent resolutions]' \
 			'--explain[show why each plan was selected]' \
-			'--strict[treat source builds as failures]' \
 			'--json[machine-readable JSON report]'
 		;;
 	status)

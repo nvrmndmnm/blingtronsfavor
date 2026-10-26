@@ -11,7 +11,8 @@ import (
 )
 
 // testState points bfctl's config and cache at fresh temp directories and
-// records one forever client with the given addon.
+// records one forever client (Forever 1.60.1, interface 16001) with the
+// given addon.
 func testState(t *testing.T, a *state.AddonState) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
@@ -25,9 +26,10 @@ func testState(t *testing.T, a *state.AddonState) {
 	}
 	st := state.New()
 	st.Clients[client.FlavorForever] = &state.ClientState{
-		Flavor: client.FlavorForever,
-		Root:   filepath.Join(t.TempDir(), "_forever_"),
-		Addons: map[string]*state.AddonState{a.ID: a},
+		Flavor:    client.FlavorForever,
+		Root:      filepath.Join(t.TempDir(), "_forever_"),
+		Interface: 16001,
+		Addons:    map[string]*state.AddonState{a.ID: a},
 	}
 	if err := state.Open(path).Save(st); err != nil {
 		t.Fatal(err)
@@ -43,8 +45,8 @@ func TestReportSummary(t *testing.T) {
 		{"clean", Report{UpToDate: 3}, "3 up to date, 0 updated"},
 		{"updated", Report{UpToDate: 1, Updated: 2}, "1 up to date, 2 updated"},
 		{"check-only", Report{CheckOnly: true, UpToDate: 1, Updates: 2}, "1 up to date, 2 update(s) available"},
-		{"mixed", Report{UpToDate: 1, Updated: 1, SourceBuild: 1, Skipped: 1, Failed: 1},
-			"1 up to date, 1 updated, 1 source build required, 1 manual skipped, 1 failed"},
+		{"mixed", Report{UpToDate: 1, Updated: 1, Skipped: 1, Failed: 1},
+			"1 up to date, 1 updated, 1 manual skipped, 1 failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

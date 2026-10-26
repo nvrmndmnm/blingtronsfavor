@@ -24,7 +24,7 @@ const maxAssetBytes = 1 << 30
 // assets are supported (plan §2); the temporary zip is always removed.
 func (r *Resolver) Fetch(ctx context.Context, plan Plan, dir string) (string, error) {
 	if plan.Strategy != state.StrategyRelease {
-		return "", fmt.Errorf("fetch %s: only the release strategy downloads assets (source builds land with M4)", plan.Strategy)
+		return "", fmt.Errorf("fetch %s: only the release strategy downloads assets (source-pkgmeta plans are built, not fetched)", plan.Strategy)
 	}
 	if plan.URL == "" {
 		return "", errors.New("fetch: plan carries no download URL")

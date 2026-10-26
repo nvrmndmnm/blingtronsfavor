@@ -17,7 +17,6 @@
 .Op Fl -check-only
 .Op Fl -workers Ar n
 .Op Fl -explain
-.Op Fl -strict
 .Op Fl -json
 .Nm
 .Cm status
@@ -36,7 +35,7 @@
 is a reproducible, offline-friendly World of Warcraft addon manager for
 Linux clients.
 It discovers client flavors
-.Pq mainline, forever, classic, mists ,
+.Pq mainline, forever, classic, mists; camelot is an accepted spelling of forever ,
 tracks addons by GitHub repository
 .Pq stable releases, a branch, or a pinned release or tag ,
 installs them atomically through a transactional installer with rollback,
@@ -74,7 +73,10 @@ tracks a development branch instead of stable releases;
 .Fl -strategy Cm release
 pins to GitHub releases and silences the staleness detector.
 .Fl -flavor
-selects the client when several are configured.
+selects the client when several are configured;
+.Cm camelot
+is accepted as a spelling of
+.Cm forever .
 .Fl -force
 takes over addon directories owned by another addon.
 .It Cm remove Ar id
@@ -84,6 +86,10 @@ Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
+An update is the matching release asset when one serves the client, and a
+local source build
+.Pq .pkgmeta externals, keyword substitution, TOC flavor split
+when no asset does or the releases are stale.
 Never prompts: suitable for launch scripts and cron.
 .Fl -check-only
 reports without downloading,
@@ -92,8 +98,6 @@ bounds concurrent resolutions
 .Pq default 4 ,
 .Fl -explain
 annotates the resolution reason of each plan,
-.Fl -strict
-treats source builds as failures,
 .Fl -json
 prints a machine-readable report.
 .It Cm status
@@ -145,7 +149,6 @@ Usage error.
 .It 4
 .Pq Cm sync
 partial failure: some addons failed
-.Pq or, with Fl -strict , deferred to a source build .
 .El
 .Sh JSON OUTPUT
 .Cm status Fl -json
@@ -188,7 +191,10 @@ Resolved metadata cache
 .Sh ENVIRONMENT
 .Bl -tag -width GH_TOKEN
 .It Ev GH_TOKEN , GITHUB_TOKEN
-Optional GitHub token raising API rate limits.
+Optional GitHub personal access token sent as a bearer token on every API
+request, raising the rate limit from 60 to 5000 requests per hour.
+GH_TOKEN takes precedence over GITHUB_TOKEN; any classic token suffices for
+public repositories.
 Never written to logs or state.
 .It Ev XDG_CONFIG_HOME , XDG_CACHE_HOME , BFCTL_CONFIG_HOME , BFCTL_CACHE_HOME
 Override the default directories.

@@ -1,9 +1,11 @@
-// Package github is a minimal, unauthenticated GitHub REST API client with
-// an ETag-based HTTP response cache. Every request goes through the cache
-// layer: a fresh cached entry is revalidated with If-None-Match, and a 304
-// replays the cached body without consuming rate-limit quota. The client
-// reads no credentials from the environment or from any tool configuration;
-// it talks to the public API only.
+// Package github is a minimal GitHub REST API client with an ETag-based HTTP
+// response cache. Every request goes through the cache layer: a fresh cached
+// entry is revalidated with If-None-Match, and a 304 replays the cached body
+// without consuming rate-limit quota. Requests are unauthenticated unless a
+// caller passes Options.Token (see TokenFromEnv for the GH_TOKEN /
+// GITHUB_TOKEN convention); the package itself reads no credentials from the
+// environment or from any tool configuration. A token is held in memory
+// only — never logged and never written to the cache or state.
 package github
 
 import (
@@ -14,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +86,13 @@ type Options struct {
 	// Version is the bfctl version baked into the User-Agent header
 	// ("bfctl/<version>").
 	Version string
+
+	// Token, when non-empty, is sent as "Authorization: Bearer <token>"
+	// on every request, raising the GitHub API rate limit from 60 to 5000
+	// requests per hour. It is held in memory only: never logged and
+	// never written to the cache or state. TokenFromEnv supplies it from
+	// the GH_TOKEN / GITHUB_TOKEN environment variables.
+	Token string
 }
 
 // RateLimit is the most recent rate-limit snapshot observed from response
@@ -173,6 +183,7 @@ type Client struct {
 	baseURL    string
 	cacheDir   string
 	userAgent  string
+	token      string
 	timeout    time.Duration
 	cacheTTL   time.Duration
 	offline    bool
@@ -222,11 +233,25 @@ func New(opts Options) (*Client, error) {
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		cacheDir:   cacheDir,
 		userAgent:  "bfctl/" + version,
+		token:      strings.TrimSpace(opts.Token),
 		timeout:    timeout,
 		cacheTTL:   ttl,
 		offline:    opts.Offline,
 		sem:        make(chan struct{}, concurrency),
 	}, nil
+}
+
+// TokenFromEnv returns the GitHub token from the environment, following the
+// gh CLI convention: GH_TOKEN first, then GITHUB_TOKEN. Values are
+// whitespace-trimmed; when neither holds a non-blank value the result is ""
+// and callers stay unauthenticated. The token is never logged or stored.
+func TokenFromEnv() string {
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Releases returns the ten most recent releases of owner/repo. The list
@@ -325,6 +350,9 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	}
 	req.Header.Set("Accept", acceptHeader)
 	req.Header.Set("User-Agent", c.userAgent)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	if entry != nil && entry.ETag != "" && !entry.expired(c.cacheTTL, time.Now()) {
 		req.Header.Set("If-None-Match", entry.ETag)
 	}
