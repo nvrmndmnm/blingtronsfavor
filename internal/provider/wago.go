@@ -59,13 +59,13 @@ type wagoPage struct {
 // download link and the per-release flavor support fields. Fields bfctl does
 // not need are ignored.
 type wagoRelease struct {
-	ID        string              // release id
-	Label     string              // version label, e.g. "5.19.0"
-	Stability string              // "stable", "beta", "alpha"
-	Changelog string              // inline markdown changelog
-	CreatedAt string              // release timestamp
-	Download  string              // pre-signed download link (expires ~2h)
-	Patches   map[string][]string // "supported_<flavor>_patches" by flavor key
+	ID        string                     // release id
+	Label     string                     // version label, e.g. "5.19.0"
+	Stability string                     // "stable", "beta", "alpha"
+	Changelog string                     // inline markdown changelog
+	CreatedAt string                     // release timestamp
+	Download  string                     // pre-signed download link (expires ~2h)
+	Patches   map[client.Flavor][]string // "supported_<flavor>_patches" by flavor key
 }
 
 // wagoFlavorKeys are the per-release flavor support fields observed on the
@@ -115,7 +115,7 @@ func (r *wagoRelease) UnmarshalJSON(b []byte) error {
 			continue // oddly shaped: degrade to no information
 		}
 		if r.Patches == nil {
-			r.Patches = make(map[string][]string, len(wagoFlavorKeys))
+			r.Patches = make(map[client.Flavor][]string, len(wagoFlavorKeys))
 		}
 		r.Patches[flavor] = list
 	}
@@ -249,10 +249,7 @@ func wagoDataPage(page []byte) ([]byte, error) {
 	if end < 0 {
 		return nil, errors.New("unterminated data-page payload")
 	}
-	raw, err := html.UnescapeString(string(rest[:end]))
-	if err != nil {
-		return nil, fmt.Errorf("unescape data-page payload: %w", err)
-	}
+	raw := html.UnescapeString(string(rest[:end]))
 	return []byte(raw), nil
 }
 
