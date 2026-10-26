@@ -100,6 +100,7 @@ func TestFor(t *testing.T) {
 	}{
 		{state.SourceTukui, "*provider.Tukui"},
 		{state.SourceWoWI, "*provider.WoWI"},
+		{state.SourceWago, "*provider.Wago"},
 		{state.SourceGit, "*provider.GitDirect"},
 	}
 	for _, c := range cases {
