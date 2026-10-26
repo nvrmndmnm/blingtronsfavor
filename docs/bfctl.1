@@ -191,7 +191,10 @@ Resolved metadata cache
 .Sh ENVIRONMENT
 .Bl -tag -width GH_TOKEN
 .It Ev GH_TOKEN , GITHUB_TOKEN
-Optional GitHub token raising API rate limits.
+Optional GitHub personal access token sent as a bearer token on every API
+request, raising the rate limit from 60 to 5000 requests per hour.
+GH_TOKEN takes precedence over GITHUB_TOKEN; any classic token suffices for
+public repositories.
 Never written to logs or state.
 .It Ev XDG_CONFIG_HOME , XDG_CACHE_HOME , BFCTL_CONFIG_HOME , BFCTL_CACHE_HOME
 Override the default directories.

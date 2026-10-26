@@ -314,7 +314,7 @@ func gitRepoName(raw string) string {
 
 // newResolver builds the GitHub-backed resolver for a command run.
 func newResolver(bi BuildInfo) (*resolver.Resolver, error) {
-	gh, err := github.New(github.Options{Version: bi.Version})
+	gh, err := github.New(github.Options{Version: bi.Version, Token: github.TokenFromEnv()})
 	if err != nil {
 		return nil, err
 	}

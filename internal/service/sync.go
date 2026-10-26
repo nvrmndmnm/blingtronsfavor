@@ -160,7 +160,7 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 
 // newResolver builds the GitHub-backed resolver.
 func newResolver() (*resolver.Resolver, error) {
-	gh, err := github.New(github.Options{Version: ToolVersion})
+	gh, err := github.New(github.Options{Version: ToolVersion, Token: github.TokenFromEnv()})
 	if err != nil {
 		return nil, err
 	}
