@@ -3,10 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
@@ -30,12 +28,11 @@ type ResultKind string
 
 // Per-addon sync outcomes.
 const (
-	ResultUpToDate    ResultKind = "up-to-date"
-	ResultAvailable   ResultKind = "update-available"
-	ResultUpdated     ResultKind = "updated"
-	ResultSourceBuild ResultKind = "source-build"
-	ResultSkipped     ResultKind = "skipped"
-	ResultFailed      ResultKind = "failed"
+	ResultUpToDate  ResultKind = "up-to-date"
+	ResultAvailable ResultKind = "update-available"
+	ResultUpdated   ResultKind = "updated"
+	ResultSkipped   ResultKind = "skipped"
+	ResultFailed    ResultKind = "failed"
 )
 
 // Result is one per-addon sync outcome, ready for text, JSON or TUI display.
@@ -52,15 +49,14 @@ type Result struct {
 
 // Report is the aggregate outcome of a Sync run.
 type Report struct {
-	Results     []Result
-	CheckOnly   bool
-	UpToDate    int
-	Updates     int // update-available outcomes (check-only runs)
-	Updated     int
-	SourceBuild int
-	Skipped     int
-	Failed      int
-	RateHint    string // GitHub rate-limit wait hint, when rate limited
+	Results   []Result
+	CheckOnly bool
+	UpToDate  int
+	Updates   int // update-available outcomes (check-only runs)
+	Updated   int
+	Skipped   int
+	Failed    int
+	RateHint  string // GitHub rate-limit wait hint, when rate limited
 }
 
 // Summary renders the one-line summary "bfctl sync" prints.
@@ -68,9 +64,6 @@ func (r Report) Summary() string {
 	summary := fmt.Sprintf("%d up to date, %d updated", r.UpToDate, r.Updated)
 	if r.CheckOnly {
 		summary = fmt.Sprintf("%d up to date, %d update(s) available", r.UpToDate, r.Updates)
-	}
-	if r.SourceBuild > 0 {
-		summary += fmt.Sprintf(", %d source build required", r.SourceBuild)
 	}
 	if r.Skipped > 0 {
 		summary += fmt.Sprintf(", %d manual skipped", r.Skipped)
@@ -129,19 +122,16 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 			rep.Failed++
 		default:
 			plan := outcome.plan
-			r.Plan, r.To = plan, plan.Version
+			r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
 			switch {
-			case plan.Strategy != state.StrategyRelease:
-				r.Kind = ResultSourceBuild
-				rep.SourceBuild++
-			case plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag:
+			case plan.Version != "" && (plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag):
 				r.Kind = ResultUpToDate
 				rep.UpToDate++
 			case opts.CheckOnly:
 				r.Kind = ResultAvailable
 				rep.Updates++
 			default:
-				if err := installUpdate(ctx, res, task, plan); err != nil {
+				if err := InstallPlan(ctx, res, task.flavor, *task.addon, plan, false); err != nil {
 					r.Kind, r.Err = ResultFailed, err
 					if h, ok := github.RateLimitHint(err); ok && rep.RateHint == "" {
 						rep.RateHint = h
@@ -165,32 +155,6 @@ func newResolver() (*resolver.Resolver, error) {
 		return nil, err
 	}
 	return &resolver.Resolver{GH: gh}, nil
-}
-
-// installUpdate downloads and unpacks the plan's release asset and installs
-// it atomically through the installer, recording the new version and upstream
-// tag on the addon's existing state entry.
-func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, plan resolver.Plan) error {
-	dir, err := os.MkdirTemp("", "bfctl-sync-")
-	if err != nil {
-		return fmt.Errorf("create fetch directory: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	root, err := res.Fetch(ctx, plan, dir)
-	if err != nil {
-		return err
-	}
-	rec := *task.addon
-	rec.Strategy = plan.Strategy
-	rec.InstalledVersion = plan.Version
-	rec.InstalledCommit = ""
-	rec.ETag = plan.Version
-	rec.UpdatedAt = time.Now().UTC()
-	in, err := installerFor()
-	if err != nil {
-		return err
-	}
-	return in.Install(ctx, installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
 }
 
 // installerFor builds the atomic installer backed by the default state store.

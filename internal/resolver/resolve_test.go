@@ -501,7 +501,7 @@ func TestResolveSkipsDrafts(t *testing.T) {
 
 // TestResolveFallsBackToSourceBuild: when no release asset serves the flavor
 // the plan is a source-pkgmeta build with a "source build required" reason
-// and the tracked ref — the shape "bfctl sync" skips cleanly until M4.
+// and the tracked ref — built from source on the next install.
 func TestResolveFallsBackToSourceBuild(t *testing.T) {
 	srv := newFixture(t, releasesForeignOnly, map[string]string{})
 
@@ -520,6 +520,91 @@ func TestResolveFallsBackToSourceBuild(t *testing.T) {
 	}
 	if plan.Ref != "develop" {
 		t.Errorf("Ref = %q, want the tracked branch develop", plan.Ref)
+	}
+}
+
+// TestResolveSourcePlanVersionStamps pins the version stamp of source-pkgmeta
+// plans: a tag ref stamps the tag name (tags are immutable), a branch ref
+// stamps the short SHA of its HEAD commit (so callers rebuild exactly when
+// the branch moves), and an unanchored plan tracks the repository's default
+// branch.
+func TestResolveSourcePlanVersionStamps(t *testing.T) {
+	const (
+		shaTag  = "1111111111111111111111111111111111111111"
+		shaHead = "abcdef12abcdef12abcdef12abcdef12abcdef12"
+		shaOld  = "9999999999999999999999999999999999999999"
+	)
+	for _, tc := range []struct {
+		name       string
+		api        staleAPI
+		req        Request
+		wantRef    string
+		wantVer    string
+		wantReason string
+	}{
+		{
+			name: "tag ref stamps the tag name",
+			api: staleAPI{
+				branch: "master",
+				tags:   []github.Tag{{Name: "v1.2", Commit: github.TagCommit{SHA: shaTag}}},
+				commits: map[string]github.Commit{
+					shaTag:   staleCommit(shaTag, staleTime(1)),
+					"master": staleCommit(shaHead, staleTime(2)),
+				},
+			},
+			req:        Request{Owner: "demo", Repo: "addon", Flavor: client.FlavorForever, DefaultBranch: "master"},
+			wantRef:    "v1.2",
+			wantVer:    "v1.2",
+			wantReason: "no releases",
+		},
+		{
+			name: "branch ref stamps the short SHA",
+			api: staleAPI{
+				branch: "master",
+				tags:   []github.Tag{{Name: "v1.0", Commit: github.TagCommit{SHA: shaOld}}},
+				commits: map[string]github.Commit{
+					shaOld:   staleCommit(shaOld, staleTime(2)),
+					"master": staleCommit(shaHead, staleTime(1)),
+				},
+			},
+			req:        Request{Owner: "demo", Repo: "addon", Flavor: client.FlavorForever, DefaultBranch: "master"},
+			wantRef:    "master",
+			wantVer:    "abcdef12",
+			wantReason: "no releases",
+		},
+		{
+			name: "pinned plan tracks the default branch",
+			api: staleAPI{
+				branch:  "master",
+				commits: map[string]github.Commit{"master": staleCommit(shaHead, staleTime(1))},
+			},
+			req: Request{
+				Owner: "demo", Repo: "addon", Flavor: client.FlavorForever,
+				Tracking: "stable", PinnedStrategy: state.StrategySourcePkgmeta,
+			},
+			wantRef:    "master",
+			wantVer:    "abcdef12",
+			wantReason: "pinned to strategy source-pkgmeta",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := newStaleResolver(t, tc.api).Resolve(context.Background(), tc.req)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if plan.Strategy != state.StrategySourcePkgmeta {
+				t.Fatalf("Strategy = %q, want %q (reason: %s)", plan.Strategy, state.StrategySourcePkgmeta, plan.Reason)
+			}
+			if plan.Ref != tc.wantRef {
+				t.Errorf("Ref = %q, want %q", plan.Ref, tc.wantRef)
+			}
+			if plan.Version != tc.wantVer {
+				t.Errorf("Version = %q, want %q", plan.Version, tc.wantVer)
+			}
+			if !strings.Contains(plan.Reason, tc.wantReason) {
+				t.Errorf("Reason = %q, want substring %q", plan.Reason, tc.wantReason)
+			}
+		})
 	}
 }
 

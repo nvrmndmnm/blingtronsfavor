@@ -17,7 +17,6 @@
 .Op Fl -check-only
 .Op Fl -workers Ar n
 .Op Fl -explain
-.Op Fl -strict
 .Op Fl -json
 .Nm
 .Cm status
@@ -87,6 +86,10 @@ Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
+An update is the matching release asset when one serves the client, and a
+local source build
+.Pq .pkgmeta externals, keyword substitution, TOC flavor split
+when no asset does or the releases are stale.
 Never prompts: suitable for launch scripts and cron.
 .Fl -check-only
 reports without downloading,
@@ -95,8 +98,6 @@ bounds concurrent resolutions
 .Pq default 4 ,
 .Fl -explain
 annotates the resolution reason of each plan,
-.Fl -strict
-treats source builds as failures,
 .Fl -json
 prints a machine-readable report.
 .It Cm status
@@ -148,7 +149,6 @@ Usage error.
 .It 4
 .Pq Cm sync
 partial failure: some addons failed
-.Pq or, with Fl -strict , deferred to a source build .
 .El
 .Sh JSON OUTPUT
 .Cm status Fl -json

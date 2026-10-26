@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/itp5b5/blessforge/internal/adopt"
 	"github.com/itp5b5/blessforge/internal/client"
@@ -201,6 +202,10 @@ func plural(n int, singular, p string) string {
 	}
 	return p
 }
+
+// stateLockTimeout is how long manifest writes wait for the state lock
+// (mirrors the installer's own timeout).
+const stateLockTimeout = 5 * time.Second
 
 // persistAdopt writes the report's bind and manual proposals into the state
 // under the state lock, leaving skipped groups and unrelated state untouched.
