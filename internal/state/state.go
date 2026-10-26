@@ -114,6 +114,7 @@ const (
 	SourceGit    SourceKind = "git"
 	SourceTukui  SourceKind = "tukui"
 	SourceWoWI   SourceKind = "wowi"
+	SourceWago   SourceKind = "wago"
 
 	// SourceManual marks an addon installed by a foreign tool that bfctl
 	// tracks but never touches: "bfctl sync" skips it until the user binds
