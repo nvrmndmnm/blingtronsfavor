@@ -99,7 +99,7 @@ func TestResolveAllFailSoft(t *testing.T) {
 	results := resolveAll(context.Background(), nil, []syncTask{
 		{flavor: client.FlavorForever, addon: manual},
 		{flavor: client.FlavorForever, addon: orphan},
-	}, 2, state.New())
+	}, 2, &state.Config{})
 	if results[0].skip == "" || results[0].err != nil {
 		t.Errorf("manual entry = %+v, want a skip", results[0])
 	}
