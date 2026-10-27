@@ -189,12 +189,15 @@ func TestWagoRecentReleases(t *testing.T) {
 
 	// WeakAuras shape: the newest entries are classic bundles (retail
 	// null) and the retail release only exists in recent_releases.
-	props = `{"metadata":{"recent_releases":{
+	// A new variable, not a reassignment of props: the eqol server's
+	// closure reads props per request, and w3 below still needs the eqol
+	// payload from that server.
+	propsWA := `{"metadata":{"recent_releases":{
 		"retail":{"label":"5.21.1","changelog":"retail notes","download_link":"https://cdn.invalid/wa-retail.zip","supported_retail_patches":["11.2.7"]}}},
 	"releases":{"data":[
 		{"id":"c","label":"5.22.1","stability":"stable","changelog":"classic bundle","download_link":"https://cdn.invalid/wa-classic.zip","supported_cata_patches":["4.4.5"],"supported_wotlk_patches":["3.4.5"],"supported_bc_patches":["2.5.6"],"supported_classic_patches":["1.15.8"],"supported_mop_patches":["5.5.5"],"supported_retail_patches":null}
 	]}}`
-	srv2, _ := serveWago(t, func() string { return wagoPageOf(props) })
+	srv2, _ := serveWago(t, func() string { return wagoPageOf(propsWA) })
 	w2 := &Wago{Base: srv2.URL, Flavor: client.FlavorMainline}
 	rel, err = w2.release(context.Background(), "weakauras")
 	if err != nil {
