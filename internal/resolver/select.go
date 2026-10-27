@@ -256,7 +256,7 @@ func classifyAsset(name string, flavor client.Flavor) (assetClass, bool) {
 		if isForeignFlavor(t) {
 			return assetClass{}, false // another game flavor's package
 		}
-		f, ok := flavorAliases[t]
+		f, ok := flavorForKey(t)
 		if !ok {
 			continue
 		}

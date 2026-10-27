@@ -22,7 +22,7 @@ import (
 func runStatus(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("status")
 	scanDir := fs.String("scan", "", "scan an AddOns directory and report .toc selection and compatibility per addon")
-	scanFlavor := fs.String("flavor", "", "client flavor for --scan: mainline, forever, classic or mists")
+	scanFlavor := fs.String("flavor", "", "client flavor for --scan: mainline, forever (a.k.a. camelot), classic or mists")
 	scanInterface := fs.Int("interface", 0, "client interface number for --scan")
 	offline := fs.Bool("offline", false, "no network access: drop the Upstream column")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
@@ -179,11 +179,9 @@ func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
 		if flavorFlag == "" || interfaceFlag == 0 {
 			return nil, errors.New("--flavor and --interface must be passed together")
 		}
-		flavor := client.Flavor(flavorFlag)
-		switch flavor {
-		case client.FlavorMainline, client.FlavorForever, client.FlavorClassic, client.FlavorMists:
-		default:
-			return nil, fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists)", flavorFlag)
+		flavor, ok := client.FlavorForKey(flavorFlag)
+		if !ok {
+			return nil, fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists; \"camelot\" is an accepted spelling of forever)", flavorFlag)
 		}
 		return &toc.Target{Flavor: flavor, Interface: interfaceFlag}, nil
 	}

@@ -3,10 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
@@ -31,12 +29,11 @@ type ResultKind string
 
 // Per-addon sync outcomes.
 const (
-	ResultUpToDate    ResultKind = "up-to-date"
-	ResultAvailable   ResultKind = "update-available"
-	ResultUpdated     ResultKind = "updated"
-	ResultSourceBuild ResultKind = "source-build"
-	ResultSkipped     ResultKind = "skipped"
-	ResultFailed      ResultKind = "failed"
+	ResultUpToDate  ResultKind = "up-to-date"
+	ResultAvailable ResultKind = "update-available"
+	ResultUpdated   ResultKind = "updated"
+	ResultSkipped   ResultKind = "skipped"
+	ResultFailed    ResultKind = "failed"
 )
 
 // Result is one per-addon sync outcome, ready for text, JSON or TUI display.
@@ -53,15 +50,14 @@ type Result struct {
 
 // Report is the aggregate outcome of a Sync run.
 type Report struct {
-	Results     []Result
-	CheckOnly   bool
-	UpToDate    int
-	Updates     int // update-available outcomes (check-only runs)
-	Updated     int
-	SourceBuild int
-	Skipped     int
-	Failed      int
-	RateHint    string // GitHub rate-limit wait hint, when rate limited
+	Results   []Result
+	CheckOnly bool
+	UpToDate  int
+	Updates   int // update-available outcomes (check-only runs)
+	Updated   int
+	Skipped   int
+	Failed    int
+	RateHint  string // GitHub rate-limit wait hint, when rate limited
 }
 
 // Summary renders the one-line summary "bfctl sync" prints.
@@ -69,9 +65,6 @@ func (r Report) Summary() string {
 	summary := fmt.Sprintf("%d up to date, %d updated", r.UpToDate, r.Updated)
 	if r.CheckOnly {
 		summary = fmt.Sprintf("%d up to date, %d update(s) available", r.UpToDate, r.Updates)
-	}
-	if r.SourceBuild > 0 {
-		summary += fmt.Sprintf(", %d source build required", r.SourceBuild)
 	}
 	if r.Skipped > 0 {
 		summary += fmt.Sprintf(", %d manual skipped", r.Skipped)
@@ -130,7 +123,7 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 			rep.Failed++
 		default:
 			plan := outcome.plan
-			r.Plan, r.To = plan, plan.Version
+			r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
 			switch {
 			// Release assets and provider packages (direct) install; a pure
 			// source build does not and stays distinct in the report.
@@ -163,7 +156,7 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 
 // newResolver builds the GitHub-backed resolver.
 func newResolver() (*resolver.Resolver, error) {
-	gh, err := github.New(github.Options{Version: ToolVersion})
+	gh, err := github.New(github.Options{Version: ToolVersion, Token: github.TokenFromEnv()})
 	if err != nil {
 		return nil, err
 	}

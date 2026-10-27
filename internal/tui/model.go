@@ -164,13 +164,14 @@ func (m *Model) statusText(a service.AddonRow) string {
 	}
 	switch r.Kind {
 	case service.ResultUpdated:
+		if r.From == "-" {
+			return "installed " + r.To
+		}
 		return "updated " + r.From + " → " + r.To
 	case service.ResultUpToDate:
 		return "up to date"
 	case service.ResultAvailable:
 		return "update " + r.To
-	case service.ResultSourceBuild:
-		return "source build"
 	case service.ResultSkipped:
 		return "manual"
 	case service.ResultFailed:
