@@ -45,9 +45,9 @@ func cfRef(slug string) state.SourceRef {
 
 // TestCfwidgetCheckPicksNewestFlavorFile exercises the recorded payload
 // shape end to end: per flavor the newest release file serving that
-// version line wins, newer pre-releases and newer files of unserved lines
-// are never picked, and every checked flavor resolves the same multi-line
-// package the mirror lists.
+// version line wins — newer pre-releases and newer files of unserved lines
+// are never picked while a release serves the flavor — and every checked
+// flavor resolves the same multi-line package the mirror lists.
 func TestCfwidgetCheckPicksNewestFlavorFile(t *testing.T) {
 	fastScrape(t)
 	srv, _ := serveCfwidget(t, func() string { return cfwidgetFixture(t, "cfwidget-details.json") })
@@ -81,20 +81,54 @@ func TestCfwidgetCheckPicksNewestFlavorFile(t *testing.T) {
 	}
 }
 
-// TestCfwidgetUnservedLinesAndPrerelease: a project whose release files
-// only serve version lines no bfctl flavor serves, and whose only
-// flavor-matching file is a beta, yields no file at all — pre-releases are
-// never installed and unserved lines are never forced onto a client.
-func TestCfwidgetUnservedLinesAndPrerelease(t *testing.T) {
+// TestCfwidgetChannelFallbackAndUnservedLines pins the channel fallback
+// and the unserved-line refusals: a flavor served only by a lower channel
+// still installs (authors ship whole client lines on the beta channel —
+// RareScanner's WoW Forever files are all betas), while version lines no
+// flavor serves are never forced onto a client.
+func TestCfwidgetChannelFallbackAndUnservedLines(t *testing.T) {
 	fastScrape(t)
 	srv, _ := serveCfwidget(t, func() string { return cfwidgetFixture(t, "cfwidget-unserved.json") })
 
-	for _, flavor := range []client.Flavor{client.FlavorMainline, client.FlavorClassic, client.FlavorForever, client.FlavorMists} {
+	// Mainline is served only by the beta row — the beta is picked.
+	c := &Cfwidget{Base: srv.URL, Flavor: client.FlavorMainline}
+	got, err := c.Check(context.Background(), cfRef("40001"))
+	if err != nil {
+		t.Fatalf("check mainline: %v", err)
+	}
+	if got.Version != "Co-2.0-beta" {
+		t.Errorf("mainline version = %q, want the beta fallback Co-2.0-beta", got.Version)
+	}
+
+	// No file at all serves the other lines — unserved lines are never
+	// forced onto a client, on any channel.
+	for _, flavor := range []client.Flavor{client.FlavorClassic, client.FlavorForever, client.FlavorMists} {
 		c := &Cfwidget{Base: srv.URL, Flavor: flavor}
 		_, err := c.Check(context.Background(), cfRef("40001"))
-		if err == nil || !strings.Contains(err.Error(), "no release file serves flavor") {
-			t.Errorf("check %s = %v, want a no-release-file error", flavor, err)
+		if err == nil || !strings.Contains(err.Error(), "no file serves flavor") {
+			t.Errorf("check %s = %v, want a no-file error", flavor, err)
 		}
+	}
+}
+
+// TestCfwidgetAlphaFallback pins the last channel step: when not even a
+// beta serves the flavor, the alpha is taken.
+func TestCfwidgetAlphaFallback(t *testing.T) {
+	fastScrape(t)
+	payload := `{"id":40005,"title":"AlphaOnly","files":[{"id":8000002,` +
+		`"url":"https://www.curseforge.com/wow/addons/alphaonly/files/8000002",` +
+		`"display":"A-1","name":"A-1.zip","type":"alpha","version":"1.60.1",` +
+		`"versions":["1.60.1"],"uploaded_at":"2026-10-01T00:00:00.000+00:00"}],` +
+		`"urls":{"curseforge":"https://www.curseforge.com/wow/addons/alphaonly"}}`
+	srv, _ := serveCfwidget(t, func() string { return payload })
+
+	c := &Cfwidget{Base: srv.URL, Flavor: client.FlavorForever}
+	got, err := c.Check(context.Background(), cfRef("40005"))
+	if err != nil {
+		t.Fatalf("check forever: %v", err)
+	}
+	if got.Version != "A-1" {
+		t.Errorf("version = %q, want the alpha fallback A-1", got.Version)
 	}
 }
 
@@ -157,8 +191,8 @@ func TestCfwidgetErrorShapes(t *testing.T) {
 	srv2, _ := serveCfwidget(t, func() string { return cfwidgetFixture(t, "cfwidget-empty.json") })
 	c = &Cfwidget{Base: srv2.URL, Flavor: client.FlavorMainline}
 	_, err = c.Check(context.Background(), cfRef("40003"))
-	if err == nil || !strings.Contains(err.Error(), "no release file") {
-		t.Errorf("empty error = %v, want a no-release-file error", err)
+	if err == nil || !strings.Contains(err.Error(), "no file") {
+		t.Errorf("empty error = %v, want a no-file error", err)
 	}
 
 	c = &Cfwidget{Base: srv.URL, Flavor: client.FlavorMainline}

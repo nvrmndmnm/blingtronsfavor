@@ -59,7 +59,7 @@ type Cfwidget struct {
 	// Flavor selects the client line whose files are picked (a file is
 	// picked when one of its game versions maps to the flavor's version
 	// line, or names exactly the client version Interface describes).
-	// Zero value takes the newest release of any version line.
+	// Zero value takes the newest file of any version line.
 	Flavor client.Flavor
 
 	// Interface is the client interface version written into staged .toc
@@ -127,8 +127,9 @@ type cfFile struct {
 	Uploaded time.Time `json:"uploaded_at"`
 }
 
-// Check resolves the project to its newest flavor-matching release file and
-// reports the upstream state: the author's display version as the version,
+// Check resolves the project to its newest flavor-matching file — on the
+// most stable CurseForge channel that has one, see pick — and reports the
+// upstream state: the author's display version as the version,
 // the per-file CurseForge page as the changelog (the changelog lives there,
 // and it is a project page — never a downloaded link URL), and the
 // constructed open-CDN URL as the download.
@@ -181,32 +182,40 @@ func (c *Cfwidget) fileURL(fileID int, name string) string {
 	return fmt.Sprintf("%s/files/%d/%d/%s", base, fileID/1000, fileID%1000, url.PathEscape(name))
 }
 
-// pick returns the newest release file serving c.Flavor: files[] is the
-// mirror's upload history and its order is not guaranteed, so the newest
-// matching row is picked by upload time (file id breaks timestamp ties).
-// Only "release" files count — pre-releases are never installed — and a row
-// without a CDN name cannot be fetched at all.
+// pick returns the newest file serving c.Flavor on the most stable
+// CurseForge channel that has one: files[] is the mirror's upload history
+// and its order is not guaranteed, so the newest matching row is picked by
+// upload time (file id breaks timestamp ties), and a release file always
+// beats a beta or alpha regardless of date. Channels fall back one level
+// at a time — release, then beta, then alpha — per flavor, because authors
+// do ship whole client lines on the beta channel only (RareScanner's WoW
+// Forever files are all betas) and refusing them would leave such a
+// flavor with nothing to install; the git-direct provider's newestTag
+// sets the same precedent of taking a prerelease only when no stable one
+// exists. A row without a CDN name cannot be fetched at all.
 func (c *Cfwidget) pick(p cfPayload) (cfFile, error) {
-	var best cfFile
-	found := false
-	for _, f := range p.Files {
-		if f.Type != "release" || f.Name == "" || f.ID <= 0 {
-			continue
+	for _, channel := range []string{"release", "beta", "alpha"} {
+		var best cfFile
+		found := false
+		for _, f := range p.Files {
+			if f.Type != channel || f.Name == "" || f.ID <= 0 {
+				continue
+			}
+			if !c.serves(f) {
+				continue
+			}
+			if !found || newerFile(f, best) {
+				best, found = f, true
+			}
 		}
-		if !c.serves(f) {
-			continue
-		}
-		if !found || newerFile(f, best) {
-			best, found = f, true
+		if found {
+			return best, nil
 		}
 	}
-	if !found {
-		if c.Flavor == "" {
-			return cfFile{}, errors.New("no release file")
-		}
-		return cfFile{}, fmt.Errorf("no release file serves flavor %s", c.Flavor)
+	if c.Flavor == "" {
+		return cfFile{}, errors.New("no file")
 	}
-	return best, nil
+	return cfFile{}, fmt.Errorf("no file serves flavor %s", c.Flavor)
 }
 
 // newerFile orders uploaded files by upload time, breaking ties by file id.
