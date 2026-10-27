@@ -316,7 +316,7 @@ func (c *Cfwidget) fetch(ctx context.Context, rawURL, slug string) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("cfwidget %s: %w", slug, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("cfwidget %s: mirror returned %s", slug, resp.Status)
 	}
@@ -411,9 +411,9 @@ func (c *Cfwidget) saveCache(rawURL string, body []byte) {
 	if err != nil {
 		return
 	}
-	defer os.Remove(tmp.Name()) // no-op after a successful rename
+	defer func() { _ = os.Remove(tmp.Name()) }() // no-op after a successful rename
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return
 	}
 	if err := tmp.Close(); err != nil {
