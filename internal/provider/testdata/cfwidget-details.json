@@ -1,0 +1,91 @@
+{
+  "id": 61284,
+  "title": "Details! Damage Meter",
+  "game": "wow",
+  "type": "addon",
+  "files": [
+    {
+      "id": 9100000,
+      "url": "https://www.curseforge.com/wow/addons/details/files/9100000",
+      "display": "Details.20260901.15000.160",
+      "name": "Details-Details.20260901.15000.160.zip",
+      "type": "release",
+      "version": "12.1.0",
+      "filesize": 5600000,
+      "versions": ["12.1.0", "1.15.7"],
+      "downloads": {"total": 491000000, "today": 200, "recent": 90000},
+      "uploaded_at": "2026-09-01T09:00:00.000+00:00",
+      "sortable_name": "details-details.20260901.15000.160.zip",
+      "game_version": "12.1.0"
+    },
+    {
+      "id": 9202791,
+      "url": "https://www.curseforge.com/wow/addons/details/files/9202791",
+      "display": "Details.20261015.15339.172",
+      "name": "Details-Details.20261015.15339.172.zip",
+      "type": "release",
+      "version": "12.1.5",
+      "filesize": 5725089,
+      "versions": ["4.4.2", "3.4.5", "5.5.4", "2.5.6", "1.15.9", "3.80.2", "12.1.5", "1.60.1"],
+      "downloads": {"total": 493836723, "today": 154236, "recent": 2221976},
+      "uploaded_at": "2026-10-15T16:38:34.897+00:00",
+      "sortable_name": "details-details.20261015.15339.172.zip",
+      "game_version": "12.1.5"
+    },
+    {
+      "id": 9205001,
+      "url": "https://www.curseforge.com/wow/addons/details/files/9205001",
+      "display": "Details.20261016.15400.173-beta",
+      "name": "Details-Details.20261016.15400.173-beta.zip",
+      "type": "beta",
+      "version": "12.1.5",
+      "filesize": 5726000,
+      "versions": ["12.1.5"],
+      "downloads": {"total": 10, "today": 10, "recent": 10},
+      "uploaded_at": "2026-10-16T09:00:00.000+00:00",
+      "sortable_name": "details-details.20261016.15400.173-beta.zip",
+      "game_version": "12.1.5"
+    },
+    {
+      "id": 9205002,
+      "url": "https://www.curseforge.com/wow/addons/details/files/9205002",
+      "display": "Details.20261017.15401.174",
+      "name": "Details-Details.20261017.15401.174.zip",
+      "type": "release",
+      "version": "4.4.2",
+      "filesize": 5726001,
+      "versions": ["4.4.2", "3.4.5"],
+      "downloads": {"total": 11, "today": 11, "recent": 11},
+      "uploaded_at": "2026-10-17T09:00:00.000+00:00",
+      "sortable_name": "details-details.20261017.15401.174.zip",
+      "game_version": "4.4.2"
+    }
+  ],
+  "download": {
+    "type": "alpha",
+    "id": 9205002,
+    "url": "https://www.curseforge.com/wow/addons/details/files/9205002",
+    "display": "Details.20261017.15401.174",
+    "name": "Details-Details.20261017.15401.174.zip",
+    "version": "4.4.2",
+    "filesize": 5726001,
+    "versions": ["4.4.2", "3.4.5"],
+    "sortable_name": "details-details.20261017.15401.174.zip",
+    "uploaded_at": "2026-10-17T09:00:00.000+00:00"
+  },
+  "versions": {
+    "4.4.2": [{"id": 9205002}, {"id": 9202791}],
+    "12.1.5": [{"id": 9205001}, {"id": 9202791}],
+    "1.60.1": [{"id": 9202791}]
+  },
+  "downloads": {"total": 493836723, "today": 154236, "recent": 2221976},
+  "categories": [{"id": 1009, "name": "Combat"}],
+  "summary": "Damage meter that works everywhere.",
+  "description": "The smallest description fixture.",
+  "urls": {"curseforge": "https://www.curseforge.com/wow/addons/details", "wowi": ""},
+  "links": {"wowi": "", "curseforge": "https://www.curseforge.com/wow/addons/details"},
+  "license": "standard",
+  "thumbnail": "https://media.forgecdn.net/avatars/thumbnails/36/785/256/256/636578741863433672.png",
+  "created_at": "2018-02-05T00:43:06.343+00:00",
+  "members": [{"username": "Tercioo", "role": "Author"}]
+}

@@ -115,6 +115,10 @@ const (
 	SourceTukui  SourceKind = "tukui"
 	SourceWoWI   SourceKind = "wowi"
 	SourceWago   SourceKind = "wago"
+	// SourceCfwidget binds an addon to the cfwidget.com CurseForge mirror,
+	// keyed by the numeric CurseForge project ID (the "## X-Curse-Project-ID"
+	// TOC value).
+	SourceCfwidget SourceKind = "cfwidget"
 
 	// SourceManual marks an addon installed by a foreign tool that bfctl
 	// tracks but never touches: "bfctl sync" skips it until the user binds
