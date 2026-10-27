@@ -9,6 +9,7 @@ import (
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
 	"github.com/itp5b5/blessforge/internal/installer"
+	"github.com/itp5b5/blessforge/internal/provider"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/state"
 )
@@ -124,14 +125,19 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 			plan := outcome.plan
 			r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
 			switch {
-			case plan.Version != "" && (plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag):
+			// Release assets and provider packages (direct) install; a pure
+			// source build does not and stays distinct in the report.
+			case plan.Strategy != state.StrategyRelease && plan.Strategy != state.StrategyDirect:
+				r.Kind = ResultSourceBuild
+				rep.SourceBuild++
+			case plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag:
 				r.Kind = ResultUpToDate
 				rep.UpToDate++
 			case opts.CheckOnly:
 				r.Kind = ResultAvailable
 				rep.Updates++
 			default:
-				if err := InstallPlan(ctx, res, task.flavor, *task.addon, plan, false); err != nil {
+				if err := installUpdate(ctx, res, task, outcome); err != nil {
 					r.Kind, r.Err = ResultFailed, err
 					if h, ok := github.RateLimitHint(err); ok && rep.RateHint == "" {
 						rep.RateHint = h
@@ -157,6 +163,44 @@ func newResolver() (*resolver.Resolver, error) {
 	return &resolver.Resolver{GH: gh}, nil
 }
 
+// installUpdate downloads and unpacks the plan's payload — a GitHub release
+// asset through the resolver, a provider package through provider.Fetch —
+// and installs it atomically through the installer, recording the new
+// version, the upstream tag and the upstream changelog (the Tukui/Wago
+// inline text precedent; never a signed download link) on the addon's
+// existing state entry.
+func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult) error {
+	dir, err := os.MkdirTemp("", "bfctl-sync-")
+	if err != nil {
+		return fmt.Errorf("create fetch directory: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	var root string
+	if outcome.prov != nil {
+		if err := outcome.prov.Fetch(ctx, task.addon.Source, dir); err != nil {
+			return err
+		}
+		root = dir // provider.Fetch unpacks into dest itself
+	} else {
+		root, err = res.Fetch(ctx, outcome.plan, dir)
+		if err != nil {
+			return err
+		}
+	}
+	rec := *task.addon
+	rec.Strategy = outcome.plan.Strategy
+	rec.InstalledVersion = outcome.plan.Version
+	rec.InstalledCommit = ""
+	rec.ETag = outcome.plan.Version
+	rec.Changelog = outcome.upstream.Changelog
+	rec.UpdatedAt = time.Now().UTC()
+	in, err := installerFor()
+	if err != nil {
+		return err
+	}
+	return in.Install(ctx, installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
+}
+
 // installerFor builds the atomic installer backed by the default state store.
 func installerFor() (*installer.Installer, error) {
 	store, err := openStore()
@@ -169,14 +213,17 @@ func installerFor() (*installer.Installer, error) {
 // syncTask is one (client flavor, addon) pair to resolve and sync.
 type syncTask struct {
 	flavor client.Flavor
+	iface  int // client interface version (the git-direct packager needs it)
 	addon  *state.AddonState
 }
 
 // resolveResult is one concurrent resolution outcome.
 type resolveResult struct {
-	plan resolver.Plan
-	err  error
-	skip string // non-empty: nothing to resolve (manual entry from "bfctl adopt")
+	plan     resolver.Plan
+	prov     provider.Provider // non-nil for provider-backed sources (wago, tukui, wowi, git)
+	upstream provider.Upstream // provider-reported upstream (version, changelog)
+	err      error
+	skip     string // non-empty: nothing to resolve (manual entry from "bfctl adopt")
 }
 
 // collectTasks lists every managed addon of every recorded client flavor,
@@ -190,7 +237,7 @@ func collectTasks(st *state.State) []syncTask {
 		}
 		sort.Strings(ids)
 		for _, id := range ids {
-			tasks = append(tasks, syncTask{flavor: cs.Flavor, addon: cs.Addons[id]})
+			tasks = append(tasks, syncTask{flavor: cs.Flavor, iface: cs.Interface, addon: cs.Addons[id]})
 		}
 	}
 	return tasks
@@ -199,9 +246,11 @@ func collectTasks(st *state.State) []syncTask {
 // resolveAll resolves every task with at most workers concurrent calls — the
 // errgroup-with-limit pattern the plan calls for, kept on a semaphore plus a
 // WaitGroup so the module stays dependency-free. Per-task failures are
-// results rather than fatal errors: sync reports them and keeps going. The
-// user config supplies the staleness window (staleness_days) and any
-// per-addon strategy pin.
+// results rather than fatal errors: sync reports them and keeps going. GitHub
+// sources go through the release resolver; every other source kind goes
+// through its provider (Check now, Fetch at install time). The user config
+// supplies the staleness window (staleness_days) and any per-addon strategy
+// pin.
 func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, workers int, cfg *state.Config) []resolveResult {
 	results := make([]resolveResult, len(tasks))
 	sem := make(chan struct{}, workers)
@@ -213,7 +262,31 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 			continue
 		}
 		if task.addon.Source.Kind != state.SourceGitHub {
-			results[i].err = fmt.Errorf("unsupported source kind %q (only github resolution is implemented)", task.addon.Source.Kind)
+			p, err := provider.For(task.addon.Source.Kind, provider.Options{Flavor: task.flavor, Interface: task.iface})
+			if err != nil {
+				results[i].err = err
+				continue
+			}
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, p provider.Provider) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				up, err := p.Check(ctx, tasks[i].addon.Source)
+				if err != nil {
+					results[i].err = fmt.Errorf("addon %s: %w", tasks[i].addon.ID, err)
+					return
+				}
+				results[i].prov = p
+				results[i].upstream = up
+				results[i].plan = resolver.Plan{
+					Strategy: up.Strategy,
+					Version:  up.Version,
+					URL:      up.URL,
+					Ref:      up.Ref,
+					Reason:   "resolved by the " + string(tasks[i].addon.Source.Kind) + " provider",
+				}
+			}(i, p)
 			continue
 		}
 		ref, err := sourceRepo(task.addon)

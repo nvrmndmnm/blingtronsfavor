@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Wago Addons fixture</title></head>
+<body>
+<div id="app" data-page="{
+  &quot;component&quot;: &quot;Addon/Versions&quot;,
+  &quot;props&quot;: {
+    &quot;addon&quot;: {
+      &quot;id&quot;: &quot;quirks&quot;,
+      &quot;display_name&quot;: &quot;Quirks&quot;,
+      &quot;slug&quot;: &quot;quirks&quot;
+    },
+    &quot;releases&quot;: {
+      &quot;data&quot;: [
+        {
+          &quot;id&quot;: &quot;q2&quot;,
+          &quot;label&quot;: &quot;2.0.0&quot;,
+          &quot;stability&quot;: &quot;stable&quot;,
+          &quot;changelog&quot;: &quot;## 2.0.0\n\n- retail field is null here&quot;,
+          &quot;created_at&quot;: &quot;2026-10-20T12:00:00.000000Z&quot;,
+          &quot;size&quot;: 1234567,
+          &quot;download_link&quot;: &quot;{{DOWNLOAD}}&quot;,
+          &quot;supported_retail_patches&quot;: null,
+          &quot;supported_classic_patches&quot;: [
+            &quot;1.15.7&quot;
+          ]
+        },
+        {
+          &quot;id&quot;: &quot;q1&quot;,
+          &quot;label&quot;: &quot;1.9.0&quot;,
+          &quot;stability&quot;: &quot;stable&quot;,
+          &quot;changelog&quot;: &quot;## 1.9.0\n\n- classic explicitly unsupported&quot;,
+          &quot;created_at&quot;: &quot;2026-10-20T12:00:00.000000Z&quot;,
+          &quot;size&quot;: 1234567,
+          &quot;download_link&quot;: &quot;{{DOWNLOAD}}&quot;,
+          &quot;supported_retail_patches&quot;: [
+            &quot;12.0.0&quot;
+          ],
+          &quot;supported_classic_patches&quot;: []
+        },
+        {
+          &quot;id&quot;: &quot;q0&quot;,
+          &quot;label&quot;: &quot;1.8.0&quot;,
+          &quot;stability&quot;: &quot;stable&quot;,
+          &quot;changelog&quot;: &quot;## 1.8.0\n\n- odd flavor field shape&quot;,
+          &quot;created_at&quot;: &quot;2026-10-20T12:00:00.000000Z&quot;,
+          &quot;size&quot;: 1234567,
+          &quot;download_link&quot;: &quot;{{DOWNLOAD}}&quot;,
+          &quot;supported_retail_patches&quot;: false,
+          &quot;supported_classic_patches&quot;: 42
+        }
+      ],
+      &quot;links&quot;: null,
+      &quot;meta&quot;: {
+        &quot;current_page&quot;: 1,
+        &quot;per_page&quot;: 10
+      }
+    }
+  },
+  &quot;url&quot;: &quot;/addons/weakauras/versions&quot;,
+  &quot;version&quot;: &quot;test-fixture&quot;
+}"></div>
+</body>
+</html>

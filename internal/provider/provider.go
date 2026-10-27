@@ -1,11 +1,11 @@
 // Package provider implements the secondary upstream providers bfctl can
 // adopt and sync addons from besides GitHub releases: Tukui/ElvUI package
-// endpoints, WoWInterface JSON lookups keyed by the TOC "## X-WoWI-ID", and
-// arbitrary git remotes built through the full packager pipeline. The
-// Provider interface keeps the resolver's routing logic shared across all of
-// them (plan risk R7): every provider fails soft — a provider error surfaces
-// as a per-addon warning that "bfctl sync" skips over, never as a run-ending
-// failure.
+// endpoints, WoWInterface JSON lookups keyed by the TOC "## X-WoWI-ID", the
+// Wago Addons data-page scrape keyed by "## X-Wago-ID", and arbitrary git
+// remotes built through the full packager pipeline. The Provider interface
+// keeps the resolver's routing logic shared across all of them (plan risk R7):
+// every provider fails soft — a provider error surfaces as a per-addon warning
+// that "bfctl sync" skips over, never as a run-ending failure.
 package provider
 
 import (
@@ -36,7 +36,7 @@ const downloadTimeout = 5 * time.Minute
 // version, where its changelog lives and how it is to be installed.
 type Upstream struct {
 	Version   string         // upstream version or tag to compare with the installed one
-	Changelog string         // changelog URL for that version
+	Changelog string         // changelog for that version: inline text (the Tukui and Wago precedent) or a URL
 	Strategy  state.Strategy // install strategy Fetch implements
 	URL       string         // download URL or git remote Fetch materializes
 	Ref       string         // git ref Fetch builds at (git-direct only)
@@ -55,8 +55,9 @@ type Provider interface {
 
 // Options configures provider implementations. Zero values select a plain
 // HTTP client with a bounded per-request timeout and no client flavor
-// context (only the git-direct packager pipeline needs the flavor and
-// interface for its TOC split).
+// context (the git-direct packager pipeline needs the flavor and interface
+// for its TOC split; the Wago provider uses the flavor to pick the newest
+// release that lists support for it).
 type Options struct {
 	Flavor    client.Flavor // client flavor the packager's TOC split selects for
 	Interface int           // client interface version written into staged .toc files
@@ -85,6 +86,8 @@ func For(kind state.SourceKind, opts Options) (Provider, error) {
 		return &Tukui{HTTP: opts.client()}, nil
 	case state.SourceWoWI:
 		return &WoWI{HTTP: opts.client()}, nil
+	case state.SourceWago:
+		return &Wago{HTTP: opts.client(), Flavor: opts.Flavor}, nil
 	case state.SourceGit:
 		return &GitDirect{Flavor: opts.Flavor, Interface: opts.Interface}, nil
 	case state.SourceGitHub:
@@ -99,40 +102,48 @@ func For(kind state.SourceKind, opts Options) (Provider, error) {
 // download streams url into a temporary zip file and unpacks it into dest,
 // returning the payload root (dest itself, or dest with its single top-level
 // wrapper directory stripped — the same contract as resolver.Unpack). The
-// temporary zip is always removed.
+// temporary zip is always removed. downloadAs is the same with a display
+// name used in error messages instead of the URL — signed, expiring download
+// links must never leak into logs or state, so callers holding one pass the
+// addon slug instead.
 func download(ctx context.Context, httpClient *http.Client, url, dest string) (string, error) {
+	return downloadAs(ctx, httpClient, url, url, dest)
+}
+
+// downloadAs is download with the URL's error messages rendered under name.
+func downloadAs(ctx context.Context, httpClient *http.Client, url, name, dest string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("build request for %s: %w", url, err)
+		return "", fmt.Errorf("build request for %s: %w", name, err)
 	}
-	req.Header.Set("User-Agent", "bfctl")
+	req.Header.Set("User-Agent", scrapeUserAgent)
 	req.Header.Set("Accept", "*/*")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download %s: %w", url, err)
+		return "", fmt.Errorf("download %s: %w", name, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download %s: %s", url, resp.Status)
+		return "", fmt.Errorf("download %s: %s", name, resp.Status)
 	}
 
 	tmp, err := os.CreateTemp("", "bfctl-provider-*.zip")
 	if err != nil {
 		return "", fmt.Errorf("create package temp file: %w", err)
 	}
-	name := tmp.Name()
-	defer func() { _ = os.Remove(name) }()
+	zipPath := tmp.Name()
+	defer func() { _ = os.Remove(zipPath) }()
 	if _, err := io.Copy(tmp, io.LimitReader(resp.Body, maxDownloadBytes+1)); err != nil {
 		_ = tmp.Close()
-		return "", fmt.Errorf("download %s: %w", url, err)
+		return "", fmt.Errorf("download %s: %w", name, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("close package temp file %s: %w", name, err)
+		return "", fmt.Errorf("close package temp file %s: %w", zipPath, err)
 	}
-	if info, err := os.Stat(name); err == nil && info.Size() > maxDownloadBytes {
-		return "", fmt.Errorf("download %s: package larger than %d bytes", url, maxDownloadBytes)
+	if info, err := os.Stat(zipPath); err == nil && info.Size() > maxDownloadBytes {
+		return "", fmt.Errorf("download %s: package larger than %d bytes", name, maxDownloadBytes)
 	}
-	return unpackZip(name, dest)
+	return unpackZip(zipPath, dest)
 }
 
 // unpackZip extracts the zip archive at zipPath into dir and returns the

@@ -9,7 +9,7 @@
 .Cm init
 .Fl -path Ar root
 .Nm
-.Cm add Ar repo Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force
+.Cm add Ar source Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force
 .Nm
 .Cm remove Ar id Op Fl -flavor Ar flavor
 .Nm
@@ -38,6 +38,7 @@ It discovers client flavors
 .Pq mainline, forever, classic, mists; camelot is an accepted spelling of forever ,
 tracks addons by GitHub repository
 .Pq stable releases, a branch, or a pinned release or tag ,
+by Wago Addons page slug or ID, or by any git remote,
 installs them atomically through a transactional installer with rollback,
 and resolves multi-TOC layouts with the packaging rules used upstream
 .Pq .pkgmeta, -classic/-bcc/-wrath suffixes .
@@ -64,10 +65,13 @@ configuration layout and register the client flavor installed under
 .Ar root ,
 for example
 .Pa ~/Games/World of Warcraft/_forever_ .
-.It Cm add Ar repo
+.It Cm add Ar source
 Add and install an addon from a GitHub repository
 .Pq Ar owner/repo
-or a full URL.
+or a full URL, a Wago Addons reference
+.Pq the addon page URL or Ar wago:key ,
+or any other git remote URL.
+An addon added via Wago stays maintained through Wago.
 .Fl -branch Ar branch
 tracks a development branch instead of stable releases;
 .Fl -strategy Cm release

@@ -345,3 +345,45 @@ func TestRepositorySources(t *testing.T) {
 		t.Errorf("shared folders = %v, want SharedOne + SharedTwo", shared.Folders)
 	}
 }
+
+// TestWagoBinding covers the Wago Addons binding path: an X-Wago-ID without
+// a higher-precedence match binds a wago:<WagoID> direct source (the short ID
+// or the legacy numeric ID is the provider's URL key), folders sharing the
+// Wago ID group into one family and X-Repository still outranks X-Wago-ID.
+// A family bfctl has no provider for stays manual and names its unbound IDs.
+func TestWagoBinding(t *testing.T) {
+	dir := writeTree(t, filepath.Join(t.TempDir(), "AddOns"), map[string]string{
+		"FooWago/FooWago.toc":         "## Interface: 16001\n## Title: Foo Wago\n## Version: 2.0.0\n## X-Wago-ID: VBNBxKx5\n",
+		"FooWago_Opt/FooWago_Opt.toc": "## Interface: 16001\n## Title: Foo Wago Options\n## X-Wago-ID: VBNBxKx5\n",
+		"RepoFirst/RepoFirst.toc":     "## Interface: 16001\n## X-Wago-ID: zzzzz\n## X-Repository: https://github.com/acme/repo-first\n",
+		"CurseOnly/CurseOnly.toc":     "## Interface: 16001\n## X-Curse-Project-ID: 8315\n",
+	})
+	rep, err := Scan(dir, Options{Target: fixtureTarget})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(rep.Groups) != 3 {
+		t.Fatalf("got %d groups, want 3: %+v", len(rep.Groups), rep.Groups)
+	}
+	foo := findGroup(t, rep, "FooWago")
+	if foo.Action != ActionBind || foo.Source.Kind != state.SourceWago || foo.Source.Slug != "VBNBxKx5" {
+		t.Errorf("FooWago = %+v, want a bind to wago VBNBxKx5", foo)
+	}
+	if foo.Strategy != state.StrategyDirect {
+		t.Errorf("FooWago strategy = %q, want %q", foo.Strategy, state.StrategyDirect)
+	}
+	if foo.Reason != "X-Wago-ID VBNBxKx5" {
+		t.Errorf("FooWago reason = %q, want X-Wago-ID VBNBxKx5", foo.Reason)
+	}
+	if strings.Join(foo.Folders, ",") != "FooWago,FooWago_Opt" {
+		t.Errorf("FooWago folders = %v, want the family grouped by the shared Wago ID", foo.Folders)
+	}
+	first := findGroup(t, rep, "repo-first")
+	if first.Source.Kind != state.SourceGitHub || first.Source.Slug != "acme/repo-first" {
+		t.Errorf("RepoFirst = %+v, want X-Repository to outrank X-Wago-ID", first)
+	}
+	curse := findGroup(t, rep, "CurseOnly")
+	if curse.Action != ActionManual || !strings.Contains(curse.Reason, "curse 8315") {
+		t.Errorf("CurseOnly = %+v, want a manual entry naming its unbound curse id", curse)
+	}
+}

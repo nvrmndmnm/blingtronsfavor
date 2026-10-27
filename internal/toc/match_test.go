@@ -186,6 +186,71 @@ func TestScanWithoutTarget(t *testing.T) {
 	}
 }
 
+// TestSelectForeignSuffixes pins selection for packages that ship flavor
+// suffixes of clients bfctl does not manage — the shape real multi-flavor
+// packages carry (verified live: eqol's TBC package ships "EnhanceQoL.toc" +
+// "EnhanceQoL_TBC.toc"; WeakAuras' classic bundle ships only
+// Vanilla/TBC/Wrath/Cata/Mists tocs). The suffixes split like any other, a
+// plain toc still wins over them, and when only foreign tocs remain the
+// knownSuffixes order breaks the tie deterministically.
+func TestSelectForeignSuffixes(t *testing.T) {
+	write := func(dir string, names ...string) string {
+		t.Helper()
+		for _, name := range names {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("## Interface: 1\n"), 0o644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+		return dir
+	}
+	tests := []struct {
+		name   string
+		tocs   []string
+		flavor client.Flavor
+		want   string
+	}{
+		{
+			name:   "plain beats foreign TBC toc",
+			tocs:   []string{"EnhanceQoL.toc", "EnhanceQoL_TBC.toc"},
+			flavor: client.FlavorForever,
+			want:   "EnhanceQoL.toc",
+		},
+		{
+			name:   "classic picks its suffix among a foreign bundle",
+			tocs:   []string{"WeakAuras_Vanilla.toc", "WeakAuras_TBC.toc", "WeakAuras_Wrath.toc", "WeakAuras_Cata.toc", "WeakAuras_Mists.toc"},
+			flavor: client.FlavorClassic,
+			want:   "WeakAuras_Vanilla.toc",
+		},
+		{
+			name:   "mists picks its suffix among a foreign bundle",
+			tocs:   []string{"WeakAuras_Vanilla.toc", "WeakAuras_TBC.toc", "WeakAuras_Wrath.toc", "WeakAuras_Cata.toc", "WeakAuras_Mists.toc"},
+			flavor: client.FlavorMists,
+			want:   "WeakAuras_Mists.toc",
+		},
+		{
+			name:   "foreign-only bundle falls back by suffix order",
+			tocs:   []string{"WeakAuras_TBC.toc", "WeakAuras_Wrath.toc", "WeakAuras_Cata.toc"},
+			flavor: client.FlavorMainline,
+			want:   "WeakAuras_TBC.toc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := write(t.TempDir(), tt.tocs...)
+			sel, err := Select(dir, tt.flavor)
+			if err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+			if sel == nil {
+				t.Fatalf("Select = nil, want %s", tt.want)
+			}
+			if filepath.Base(sel.Path) != tt.want {
+				t.Errorf("Select = %s, want %s", filepath.Base(sel.Path), tt.want)
+			}
+		})
+	}
+}
+
 func TestVerdictString(t *testing.T) {
 	tests := []struct {
 		v    Verdict

@@ -24,6 +24,7 @@ type AddonRow struct {
 	Dirs       []string `json:"dirs,omitempty"`
 	SourceKind string   `json:"sourceKind,omitempty"`
 	Source     string   `json:"source,omitempty"`
+	Changelog  string   `json:"changelog,omitempty"` // changelog of the installed version (inline text or URL)
 }
 
 // ClientRow is one client flavor in a status report: the flavor badge fields
@@ -125,6 +126,7 @@ func clientRow(cs *state.ClientState) ClientRow {
 			Dirs:       a.OwnedDirs,
 			SourceKind: string(a.Source.Kind),
 			Source:     src,
+			Changelog:  a.Changelog,
 		})
 	}
 	return row

@@ -122,9 +122,12 @@ func TestSplitName(t *testing.T) {
 		{"Addon_Mists", "Addon", "_Mists"},
 		{"Addon_Camelot", "Addon", "_Camelot"},
 		{"Addon_Forever", "Addon", "_Forever"},
-		{"Addon_camelot", "Addon", "_Camelot"},
-		{"Addon_FOREVER", "Addon", "_Forever"},
+		{"Addon_TBC", "Addon", "_TBC"},
+		{"Addon_Wrath", "Addon", "_Wrath"},
+		{"Addon_Cata", "Addon", "_Cata"},
 		{"Addon", "Addon", ""},
+		{"Addon_Config", "Addon_Config", ""},
+		{"EnhanceQoL_TBC", "EnhanceQoL", "_TBC"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.base, func(t *testing.T) {

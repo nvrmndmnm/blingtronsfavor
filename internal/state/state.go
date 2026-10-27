@@ -114,6 +114,7 @@ const (
 	SourceGit    SourceKind = "git"
 	SourceTukui  SourceKind = "tukui"
 	SourceWoWI   SourceKind = "wowi"
+	SourceWago   SourceKind = "wago"
 
 	// SourceManual marks an addon installed by a foreign tool that bfctl
 	// tracks but never touches: "bfctl sync" skips it until the user binds
@@ -149,6 +150,7 @@ type AddonState struct {
 	Tracking         string    `json:"tracking,omitempty"` // "stable" or a branch name
 	InstalledVersion string    `json:"installedVersion,omitempty"`
 	InstalledCommit  string    `json:"installedCommit,omitempty"`
+	Changelog        string    `json:"changelog,omitempty"` // changelog of the installed version (inline text or URL); never a signed download link
 	ETag             string    `json:"etag,omitempty"`      // resolver's last-seen upstream tag
 	OwnedDirs        []string  `json:"ownedDirs,omitempty"` // dirs inside Interface/AddOns
 	UpdatedAt        time.Time `json:"updatedAt"`
