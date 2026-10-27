@@ -28,8 +28,10 @@ const stateLockTimeout = 5 * time.Second
 // repository resolves, resolve an install Plan, download and unpack the
 // matching release asset through the atomic installer and record state +
 // upstream tag. Wago Addons references (the addon page URL or "wago:<key>")
-// install through the Wago provider and stay bound to it for updates; any
-// other git remote installs through the git-direct provider. A Plan that
+// install through the Wago provider and stay bound to it for updates;
+// CurseForge references (the addon page URL or "cfwidget:<key>") install
+// through the cfwidget CurseForge mirror provider and stay bound to it;
+// any other git remote installs through the git-direct provider. A Plan that
 // needs a source build is recorded in the manifest without installing
 // anything and is skipped by sync until source builds land (M4).
 func runAdd(args []string, bi BuildInfo) int {
@@ -62,6 +64,23 @@ func runAdd(args []string, bi BuildInfo) int {
 			return ExitUsage
 		}
 		return addWago(key, flavor, *forceFlag)
+	}
+	// CurseForge references (the addon page URL or "cfwidget:<key>") install
+	// through the cfwidget mirror provider; the manifest entry records the
+	// cfwidget source so sync keeps maintaining the addon through the
+	// mirror. A curseforge.com page is not a git remote and must never reach
+	// the git-direct path.
+	if key, ok := parseCfRef(fs.Arg(0)); ok {
+		if *branchFlag != "" || *strategyFlag != "" {
+			fmt.Fprintln(os.Stderr, "bfctl add: --branch and --strategy only apply to GitHub repositories")
+			return ExitUsage
+		}
+		flavor, ferr := targetFlavor(*flavorFlag)
+		if ferr != nil {
+			fmt.Fprintf(os.Stderr, "bfctl add: %v\n", ferr)
+			return ExitUsage
+		}
+		return addCfwidget(key, flavor, *forceFlag)
 	}
 	ref, err := resolver.ParseRepo(fs.Arg(0))
 	if err != nil {
@@ -276,6 +295,34 @@ func parseWagoRef(raw string) (string, bool) {
 	return parts[1], parts[1] != ""
 }
 
+// parseCfRef recognizes CurseForge references and returns the cfwidget
+// mirror key: the addon page URL "https://www.curseforge.com/wow/addons/<slug>"
+// (query strings, fragments and deep links like "/files/123" are ignored)
+// and the direct short form "cfwidget:<key>". The key is the project slug
+// or the numeric project ID (the TOC "## X-Curse-Project-ID" value) — the
+// cfwidget provider resolves both. Non-WoW CurseForge games are rejected.
+func parseCfRef(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if key, ok := strings.CutPrefix(raw, "cfwidget:"); ok {
+		key = strings.Trim(strings.TrimSpace(key), "/")
+		return key, key != ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "curseforge.com", "www.curseforge.com":
+	default:
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 3 || !strings.EqualFold(parts[0], "wow") || !strings.EqualFold(parts[1], "addons") {
+		return "", false
+	}
+	return parts[2], parts[2] != ""
+}
+
 // isSourceGitURL reports whether raw is a git remote URL for any forge or
 // host, as opposed to an "owner/repo" GitHub reference (which the resolver
 // handles).
@@ -330,6 +377,27 @@ func addWago(key string, flavor client.Flavor, force bool) int {
 		return ExitError
 	}
 	fmt.Printf("added %s %s (%s, wago)\n", key, up.Version, up.Strategy)
+	return ExitOK
+}
+
+// addCfwidget installs a CurseForge addon through the cfwidget mirror
+// provider. The manifest entry records the cfwidget source, so sync keeps
+// maintaining the addon through the mirror: the mirror resolves the
+// project's release files and the packages come from CurseForge's open
+// CDN — the addon page itself is never scraped and never cloned.
+func addCfwidget(key string, flavor client.Flavor, force bool) int {
+	prov, err := providerFor(state.SourceCfwidget, flavor)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
+		return ExitError
+	}
+	ref := state.SourceRef{Kind: state.SourceCfwidget, Slug: key}
+	up, err := addViaProvider(prov, ref, key, "cfwidget:"+key, flavor, force)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
+		return ExitError
+	}
+	fmt.Printf("added %s %s (%s, cfwidget)\n", key, up.Version, up.Strategy)
 	return ExitOK
 }
 

@@ -71,8 +71,12 @@ Add and install an addon from a GitHub repository
 .Pq Ar owner/repo
 or a full URL, a Wago Addons reference
 .Pq the addon page URL or Ar wago:key ,
+a CurseForge reference
+.Pq the addon page URL or Ar cfwidget:key ,
 or any other git remote URL.
-An addon added via Wago stays maintained through Wago.
+An addon added via Wago stays maintained through Wago;
+an addon added via CurseForge stays maintained through
+the cfwidget mirror and installs from CurseForge's open CDN.
 .Fl -branch Ar branch
 tracks a development branch instead of stable releases;
 .Fl -strategy Cm release
