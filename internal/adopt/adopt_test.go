@@ -350,20 +350,18 @@ func TestRepositorySources(t *testing.T) {
 // a higher-precedence match binds a wago:<WagoID> direct source (the short ID
 // or the legacy numeric ID is the provider's URL key), folders sharing the
 // Wago ID group into one family and X-Repository still outranks X-Wago-ID.
-// A family bfctl has no provider for stays manual and names its unbound IDs.
 func TestWagoBinding(t *testing.T) {
 	dir := writeTree(t, filepath.Join(t.TempDir(), "AddOns"), map[string]string{
 		"FooWago/FooWago.toc":         "## Interface: 16001\n## Title: Foo Wago\n## Version: 2.0.0\n## X-Wago-ID: VBNBxKx5\n",
 		"FooWago_Opt/FooWago_Opt.toc": "## Interface: 16001\n## Title: Foo Wago Options\n## X-Wago-ID: VBNBxKx5\n",
 		"RepoFirst/RepoFirst.toc":     "## Interface: 16001\n## X-Wago-ID: zzzzz\n## X-Repository: https://github.com/acme/repo-first\n",
-		"CurseOnly/CurseOnly.toc":     "## Interface: 16001\n## X-Curse-Project-ID: 8315\n",
 	})
 	rep, err := Scan(dir, Options{Target: fixtureTarget})
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if len(rep.Groups) != 3 {
-		t.Fatalf("got %d groups, want 3: %+v", len(rep.Groups), rep.Groups)
+	if len(rep.Groups) != 2 {
+		t.Fatalf("got %d groups, want 2: %+v", len(rep.Groups), rep.Groups)
 	}
 	foo := findGroup(t, rep, "FooWago")
 	if foo.Action != ActionBind || foo.Source.Kind != state.SourceWago || foo.Source.Slug != "VBNBxKx5" {
@@ -382,8 +380,53 @@ func TestWagoBinding(t *testing.T) {
 	if first.Source.Kind != state.SourceGitHub || first.Source.Slug != "acme/repo-first" {
 		t.Errorf("RepoFirst = %+v, want X-Repository to outrank X-Wago-ID", first)
 	}
+}
+
+// TestCfwidgetBinding covers the CurseForge binding path: an
+// X-Curse-Project-ID without a higher-precedence match binds a
+// cfwidget:<projectID> direct source (the numeric project ID is the
+// mirror's URL key), folders sharing the Curse ID group into one family,
+// the curated table and X-Repository still outrank X-Curse-Project-ID, and
+// --bind folder=cfwidget:<projectID> pins an addon to the mirror on demand.
+func TestCfwidgetBinding(t *testing.T) {
+	dir := writeTree(t, filepath.Join(t.TempDir(), "AddOns"), map[string]string{
+		"CurseOnly/CurseOnly.toc":         "## Interface: 16001\n## X-Curse-Project-ID: 8315\n",
+		"CurseOnly_Opt/CurseOnly_Opt.toc": "## Interface: 16001\n## X-Curse-Project-ID: 8315\n",
+		"RepoFirst/RepoFirst.toc":         "## Interface: 16001\n## X-Curse-Project-ID: 99999\n## X-Repository: https://github.com/acme/repo-first\n",
+		"Pinned/Pinned.toc":               "## Interface: 16001\n",
+	})
+	rep, err := Scan(dir, Options{
+		Target: fixtureTarget,
+		Bind:   map[string]string{"Pinned": "cfwidget:2382"},
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(rep.Groups) != 3 {
+		t.Fatalf("got %d groups, want 3: %+v", len(rep.Groups), rep.Groups)
+	}
 	curse := findGroup(t, rep, "CurseOnly")
-	if curse.Action != ActionManual || !strings.Contains(curse.Reason, "curse 8315") {
-		t.Errorf("CurseOnly = %+v, want a manual entry naming its unbound curse id", curse)
+	if curse.Action != ActionBind || curse.Source.Kind != state.SourceCfwidget || curse.Source.Slug != "8315" {
+		t.Errorf("CurseOnly = %+v, want a bind to cfwidget 8315", curse)
+	}
+	if curse.Strategy != state.StrategyDirect {
+		t.Errorf("CurseOnly strategy = %q, want %q", curse.Strategy, state.StrategyDirect)
+	}
+	if curse.Reason != "X-Curse-Project-ID 8315" {
+		t.Errorf("CurseOnly reason = %q, want X-Curse-Project-ID 8315", curse.Reason)
+	}
+	if strings.Join(curse.Folders, ",") != "CurseOnly,CurseOnly_Opt" {
+		t.Errorf("CurseOnly folders = %v, want the family grouped by the shared Curse ID", curse.Folders)
+	}
+	first := findGroup(t, rep, "repo-first")
+	if first.Source.Kind != state.SourceGitHub || first.Source.Slug != "acme/repo-first" {
+		t.Errorf("RepoFirst = %+v, want X-Repository to outrank X-Curse-Project-ID", first)
+	}
+	pinned := findGroup(t, rep, "Pinned")
+	if pinned.Action != ActionBind || pinned.Source.Kind != state.SourceCfwidget || pinned.Source.Slug != "2382" {
+		t.Errorf("Pinned = %+v, want a --bind cfwidget pin", pinned)
+	}
+	if pinned.Reason != "--bind cfwidget:2382" {
+		t.Errorf("Pinned reason = %q, want --bind cfwidget:2382", pinned.Reason)
 	}
 }

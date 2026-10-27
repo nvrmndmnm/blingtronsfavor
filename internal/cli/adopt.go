@@ -16,7 +16,8 @@ import (
 	"github.com/itp5b5/blessforge/internal/toc"
 )
 
-// bindFlags collects repeated --bind folder=owner/repo overrides.
+// bindFlags collects repeated --bind folder=owner/repo overrides (or
+// folder=cfwidget:<projectId> to pin an addon to the CurseForge mirror).
 type bindFlags map[string]string
 
 // String renders the collected overrides for flag diagnostics.
@@ -29,11 +30,11 @@ func (b bindFlags) String() string {
 	return strings.Join(pairs, ",")
 }
 
-// Set records one folder=owner/repo override.
+// Set records one folder=upstream override.
 func (b bindFlags) Set(v string) error {
 	folder, repo, ok := strings.Cut(v, "=")
 	if !ok || folder == "" || repo == "" {
-		return fmt.Errorf("want folder=owner/repo, got %q", v)
+		return fmt.Errorf("want folder=owner/repo or folder=cfwidget:<projectId>, got %q", v)
 	}
 	b[folder] = repo
 	return nil
@@ -52,7 +53,7 @@ func runAdopt(args []string, bi BuildInfo) int {
 	dryRunFlag := fs.Bool("dry-run", false, "only print the proposed bindings (the default)")
 	flavorFlag := fs.String("flavor", "", "client flavor to adopt for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
 	binds := bindFlags{}
-	fs.Var(binds, "bind", "bind one folder explicitly as folder=owner/repo (repeatable)")
+	fs.Var(binds, "bind", "bind one folder explicitly as folder=owner/repo or folder=cfwidget:<projectId> (repeatable)")
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}

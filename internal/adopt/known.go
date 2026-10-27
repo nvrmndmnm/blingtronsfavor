@@ -10,7 +10,10 @@ package adopt
 // real addon's TOC metadata: a wrong project ID can mis-bind a *different*
 // addon, an empty one only costs a fallback to the name keys, so unverified
 // IDs stay empty rather than guessed. Name matching (the TOC base name or
-// addon directory name) is the reliable key until an ID is recorded.
+// addon directory name) is the reliable key until an ID is recorded. The
+// Curse IDs below were verified against the cfwidget mirror's project id
+// and title (they key SourceCfwidget bindings); Recount's stays empty —
+// no mirror project matches it.
 type KnownAddon struct {
 	Slug  string   // canonical "owner/repo" GitHub slug
 	Name  string   // display name for the binding table
@@ -27,57 +30,68 @@ var KnownAddons = []KnownAddon{
 	{
 		Slug:  "DeadlyBossMods/DeadlyBossMods",
 		Name:  "Deadly Boss Mods",
+		Curse: "3358",
 		Names: []string{"DBM-Core", "DBM-Core-Classic", "DBM-Core-WoTLK"},
 	},
 	{
 		Slug:  "BigWigsMods/BigWigs",
 		Name:  "BigWigs",
+		Curse: "2382",
 		Names: []string{"BigWigs", "BigWigs_Core", "BigWigs_Options", "BigWigs_Plugins"},
 	},
 	{
 		Slug:  "WeakAuras/WeakAuras2",
 		Name:  "WeakAuras",
+		Curse: "65387",
 		Names: []string{"WeakAuras", "WeakAuras2"},
 	},
 	{
-		Slug: "Tercioo/Details-Damage-Meter",
-		Name: "Details!",
+		Slug:  "Tercioo/Details-Damage-Meter",
+		Name:  "Details!",
+		Curse: "61284",
 		Names: []string{"Details", "Details_Compare2", "Details_DataStorage", "Details_EncounterDetails",
 			"Details_RaidCheck", "Details_Streamer", "Details_TinyThreat", "Details_Vanguard"},
 	},
 	{
 		Slug:  "Tercioo/Plater-Nameplates",
 		Name:  "Plater",
+		Curse: "100547",
 		Names: []string{"Plater"},
 	},
 	{
 		Slug:  "Nevcairiel/Bartender4",
 		Name:  "Bartender4",
+		Curse: "13501",
 		Names: []string{"Bartender4"},
 	},
 	{
 		Slug:  "Nevcairiel/TomTom",
 		Name:  "TomTom",
+		Curse: "18808",
 		Names: []string{"TomTom"},
 	},
 	{
 		Slug:  "Questie/Questie",
 		Name:  "Questie",
+		Curse: "334372",
 		Names: []string{"Questie"},
 	},
 	{
 		Slug:  "SFX-WoW/Masque",
 		Name:  "Masque",
+		Curse: "13592",
 		Names: []string{"Masque"},
 	},
 	{
 		Slug:  "Shadowed/ShadowedUnitFrames",
 		Name:  "Shadowed Unit Frames",
+		Curse: "19268",
 		Names: []string{"ShadowedUnitFrames", "ShadowedUnitFrames_Options"},
 	},
 	{
 		Slug:  "AdiAddons/AdiBags",
 		Name:  "AdiBags",
+		Curse: "23350",
 		Names: []string{"AdiBags", "AdiBags_Config"},
 	},
 	{

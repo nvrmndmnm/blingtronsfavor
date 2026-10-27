@@ -1,0 +1,40 @@
+{
+  "id": 40001,
+  "title": "Cataclysm Only",
+  "game": "wow",
+  "type": "addon",
+  "files": [
+    {
+      "id": 7000001,
+      "url": "https://www.curseforge.com/wow/addons/cataclysm-only/files/7000001",
+      "display": "Co-1.0",
+      "name": "Co-1.0.zip",
+      "type": "release",
+      "version": "4.4.2",
+      "filesize": 1024,
+      "versions": ["4.4.2", "3.4.5"],
+      "downloads": {"total": 5, "today": 5, "recent": 5},
+      "uploaded_at": "2026-10-01T00:00:00.000+00:00",
+      "game_version": "4.4.2"
+    },
+    {
+      "id": 7000002,
+      "url": "https://www.curseforge.com/wow/addons/cataclysm-only/files/7000002",
+      "display": "Co-2.0-beta",
+      "name": "Co-2.0-beta.zip",
+      "type": "beta",
+      "version": "12.1.5",
+      "filesize": 2048,
+      "versions": ["12.1.5"],
+      "downloads": {"total": 6, "today": 6, "recent": 6},
+      "uploaded_at": "2026-10-02T00:00:00.000+00:00",
+      "game_version": "12.1.5"
+    }
+  ],
+  "download": {
+    "type": "beta",
+    "id": 7000002,
+    "name": "Co-2.0-beta.zip"
+  },
+  "urls": {"curseforge": "https://www.curseforge.com/wow/addons/cataclysm-only"}
+}

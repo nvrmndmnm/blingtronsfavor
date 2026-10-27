@@ -8,6 +8,7 @@
 package adopt
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"sort"
@@ -228,13 +229,15 @@ func propose(folders []*folder, table []KnownAddon, opts Options) *Group {
 
 // resolveSource maps one family to its upstream, highest precedence first:
 //
-//  1. a --bind manual override (folder -> "owner/repo");
+//  1. a --bind manual override (folder -> "owner/repo" or
+//     "cfwidget:<projectId>");
 //  2. the curated table (Curse/Wago ID first, folder and TOC names second);
 //  3. an explicit X-Repository / X-Website git URL (GitHub -> source kind
 //     github, other forges -> git-direct);
 //  4. an X-WoWI-ID -> the WoWInterface provider;
 //  5. an X-Wago-ID -> the Wago Addons provider;
-//  6. nothing matched -> a manual entry.
+//  6. an X-Curse-Project-ID -> the cfwidget CurseForge mirror;
+//  7. nothing matched -> a manual entry.
 func resolveSource(folders []*folder, table []KnownAddon, bind map[string]string) (state.SourceRef, state.Strategy, string, []string) {
 	var notes []string
 
@@ -250,13 +253,12 @@ func resolveSource(folders []*folder, table []KnownAddon, bind map[string]string
 		}
 	}
 	if bound != "" {
-		ref, err := resolver.ParseRepo(bound)
+		ref, strategy, err := parseBindRef(bound)
 		if err != nil {
 			notes = append(notes, fmt.Sprintf("cannot use --bind value %q: %v; tracked as manual", bound, err))
 			return manualRef(folders[0]), state.StrategyManual, "unusable --bind override", notes
 		}
-		return state.SourceRef{Kind: state.SourceGitHub, URL: ref.URL(), Slug: ref.Slug()},
-			"", "--bind " + bound, notes
+		return ref, strategy, "--bind " + bound, notes
 	}
 
 	// 2. curated table, checked per folder so family members that carry
@@ -316,13 +318,37 @@ func resolveSource(folders []*folder, table []KnownAddon, bind map[string]string
 		}
 	}
 
-	// 6. nothing matched.
-	ids := unknownIDs(folders)
-	reason = "no upstream found"
-	if ids != "" {
-		reason += " (" + ids + ")"
+	// 6. CurseForge project ID — the cfwidget mirror's key is the numeric
+	// project ID straight from "## X-Curse-Project-ID".
+	for _, f := range folders {
+		if f.toc.CurseProjectID != "" {
+			return state.SourceRef{Kind: state.SourceCfwidget, Slug: f.toc.CurseProjectID}, state.StrategyDirect,
+				"X-Curse-Project-ID " + f.toc.CurseProjectID, notes
+		}
 	}
-	return manualRef(folders[0]), state.StrategyManual, reason, notes
+
+	// 7. nothing matched: a manual entry.
+	return manualRef(folders[0]), state.StrategyManual, "no upstream found", notes
+}
+
+// parseBindRef resolves one --bind value: "owner/repo" binds the GitHub
+// source (the release/staleness resolver picks the install strategy), and
+// "cfwidget:<projectId>" binds the CurseForge mirror by numeric project ID
+// (the "## X-Curse-Project-ID" value) with the direct-file strategy — the
+// way to keep an addon whose only source of truth is CurseForge maintained
+// through CurseForge.
+func parseBindRef(value string) (state.SourceRef, state.Strategy, error) {
+	if slug, ok := strings.CutPrefix(value, string(state.SourceCfwidget)+":"); ok {
+		if slug != "" {
+			return state.SourceRef{Kind: state.SourceCfwidget, Slug: slug}, state.StrategyDirect, nil
+		}
+		return state.SourceRef{}, "", errors.New("empty cfwidget project id")
+	}
+	ref, err := resolver.ParseRepo(value)
+	if err != nil {
+		return state.SourceRef{}, "", errors.New("want folder=owner/repo or cfwidget:<projectId>")
+	}
+	return state.SourceRef{Kind: state.SourceGitHub, URL: ref.URL(), Slug: ref.Slug()}, "", nil
 }
 
 // gitRefClassified is the source classification of a repository URL.
@@ -490,27 +516,6 @@ func ownsAny(a *state.AddonState, folders []string) bool {
 // foreign tool, tracked but not managed.
 func manualRef(primary *folder) state.SourceRef {
 	return state.SourceRef{Kind: state.SourceManual, Slug: primary.name}
-}
-
-// unknownIDs summarizes the project IDs of a family that bfctl has no
-// provider for (the Curse provider is still a stub) for the reason column,
-// e.g. "curse 8315". Wago IDs are bindable and bound, so they never show up
-// here.
-func unknownIDs(folders []*folder) string {
-	var parts []string
-	seen := make(map[string]bool)
-	for _, f := range folders {
-		for _, pair := range [][2]string{
-			{"curse", f.toc.CurseProjectID},
-		} {
-			if pair[1] == "" || seen[pair[0]+pair[1]] {
-				continue
-			}
-			seen[pair[0]+pair[1]] = true
-			parts = append(parts, pair[0]+" "+pair[1])
-		}
-	}
-	return strings.Join(parts, ", ")
 }
 
 // sourceKey is a stable identity for a source reference: the provider-local

@@ -1,7 +1,8 @@
 // Package provider implements the secondary upstream providers bfctl can
 // adopt and sync addons from besides GitHub releases: Tukui/ElvUI package
 // endpoints, WoWInterface JSON lookups keyed by the TOC "## X-WoWI-ID", the
-// Wago Addons data-page scrape keyed by "## X-Wago-ID", and arbitrary git
+// Wago Addons data-page scrape keyed by "## X-Wago-ID", the cfwidget
+// CurseForge mirror keyed by "## X-Curse-Project-ID", and arbitrary git
 // remotes built through the full packager pipeline. The Provider interface
 // keeps the resolver's routing logic shared across all of them (plan risk R7):
 // every provider fails soft — a provider error surfaces as a per-addon warning
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
@@ -88,6 +90,12 @@ func For(kind state.SourceKind, opts Options) (Provider, error) {
 		return &WoWI{HTTP: opts.client()}, nil
 	case state.SourceWago:
 		return &Wago{HTTP: opts.client(), Flavor: opts.Flavor}, nil
+	case state.SourceCfwidget:
+		// The payload cache is an optimization and never a hard
+		// dependency: a cache dir that cannot be created degrades to
+		// no cache instead of failing the addon.
+		dir, _ := paths.CacheSubdir("cfwidget")
+		return &Cfwidget{HTTP: opts.client(), Flavor: opts.Flavor, Interface: opts.Interface, CacheDir: dir}, nil
 	case state.SourceGit:
 		return &GitDirect{Flavor: opts.Flavor, Interface: opts.Interface}, nil
 	case state.SourceGitHub:
