@@ -3,7 +3,10 @@
 // must target.
 package client
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Flavor identifies one supported client flavor.
 type Flavor string
@@ -27,6 +30,52 @@ func (f Flavor) DisplayName() string {
 	default:
 		return "Retail"
 	}
+}
+
+// flavorAliases maps the flavor spellings seen in the wild — release.json
+// metadata keys, zip-name flavor tags, CLI flags, client directory names —
+// to the canonical Flavor. "forever" and "camelot" name the same client
+// (WoW Forever, also called Camelot) and are used interchangeably, so every
+// spelling of either folds to FlavorForever; the same folding gives the
+// other flavors their accepted spellings.
+var flavorAliases = map[string]Flavor{
+	"mainline":          FlavorMainline,
+	"retail":            FlavorMainline,
+	"main":              FlavorMainline,
+	"classic":           FlavorClassic,
+	"vanilla":           FlavorClassic,
+	"era":               FlavorClassic,
+	"classic_era":       FlavorClassic,
+	"mists":             FlavorMists,
+	"mop":               FlavorMists,
+	"pandaria":          FlavorMists,
+	"mists_of_pandaria": FlavorMists,
+	"forever":           FlavorForever,
+	"camelot":           FlavorForever,
+	"wow_forever":       FlavorForever,
+	"wow_camelot":       FlavorForever,
+}
+
+// FlavorForKey maps one flavor spelling to its canonical Flavor. It is the
+// single alias table behind CLI flags, release.json flavor keys and zip-name
+// flavor tags, so "camelot" and "forever" are interchangeable everywhere.
+func FlavorForKey(s string) (Flavor, bool) {
+	f, ok := flavorAliases[normalizeFlavorKey(s)]
+	return f, ok
+}
+
+// normalizeFlavorKey lowercases s and folds separators so the spellings
+// "Classic Era", "classic-era" and "classic_era" share one key.
+func normalizeFlavorKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '-', '.', '/':
+			return '_'
+		}
+		return r
+	}, s)
+	return strings.Trim(s, "_")
 }
 
 // Version is a parsed client version such as 12.1.0.59201 or 1.60.1.58900.

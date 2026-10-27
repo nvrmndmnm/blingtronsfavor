@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/itp5b5/blessforge/internal/adopt"
 	"github.com/itp5b5/blessforge/internal/client"
@@ -50,7 +51,7 @@ func runAdopt(args []string, bi BuildInfo) int {
 	pathFlag := fs.String("path", "", "addon directory to scan (default: the configured client's Interface/AddOns)")
 	yesFlag := fs.Bool("yes", false, "write the proposed bindings into the state (default is a dry run)")
 	dryRunFlag := fs.Bool("dry-run", false, "only print the proposed bindings (the default)")
-	flavorFlag := fs.String("flavor", "", "client flavor to adopt for: mainline, forever, classic or mists (required when several are configured)")
+	flavorFlag := fs.String("flavor", "", "client flavor to adopt for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
 	binds := bindFlags{}
 	fs.Var(binds, "bind", "bind one folder explicitly as folder=owner/repo or folder=cfwidget:<projectId> (repeatable)")
 	if code, ok := parseSubcommand(fs, args); !ok {
@@ -202,6 +203,10 @@ func plural(n int, singular, p string) string {
 	}
 	return p
 }
+
+// stateLockTimeout is how long manifest writes wait for the state lock
+// (mirrors the installer's own timeout).
+const stateLockTimeout = 5 * time.Second
 
 // persistAdopt writes the report's bind and manual proposals into the state
 // under the state lock, leaving skipped groups and unrelated state untouched.

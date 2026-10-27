@@ -23,7 +23,6 @@ func runSync(args []string, _ BuildInfo) int {
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
 	workers := fs.Int("workers", 4, "number of concurrent resolutions")
 	explain := fs.Bool("explain", false, "show why each plan was selected")
-	strict := fs.Bool("strict", false, "treat source builds deferred to M4 as failures")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
@@ -73,7 +72,7 @@ func runSync(args []string, _ BuildInfo) int {
 			fmt.Printf("note: GitHub rate limited — %s; rerun \"bfctl sync\" after that\n", rep.RateHint)
 		}
 	}
-	if rep.Failed > 0 || (*strict && rep.SourceBuild > 0) {
+	if rep.Failed > 0 {
 		return ExitPartial
 	}
 	return ExitOK
@@ -92,11 +91,17 @@ func printResult(r service.Result, explain bool) {
 	case service.ResultUpToDate:
 		fmt.Printf("%s: up to date (%s)\n", label, r.To)
 	case service.ResultAvailable:
-		fmt.Printf("%s: update available (%s -> %s)\n", label, r.From, r.To)
+		if r.From == "-" {
+			fmt.Printf("%s: %s available to install\n", label, r.To)
+		} else {
+			fmt.Printf("%s: update available (%s -> %s)\n", label, r.From, r.To)
+		}
 	case service.ResultUpdated:
-		fmt.Printf("%s: updated %s -> %s\n", label, r.From, r.To)
-	case service.ResultSourceBuild:
-		fmt.Printf("%s: source build required\n", label)
+		if r.From == "-" {
+			fmt.Printf("%s: installed %s\n", label, r.To)
+		} else {
+			fmt.Printf("%s: updated %s -> %s\n", label, r.From, r.To)
+		}
 	}
 	if explain && r.Err == nil && r.Plan.Strategy != "" {
 		fmt.Printf("    plan: %s ref=%s reason: %s\n", r.Plan.Strategy, r.Plan.Ref, r.Plan.Reason)
@@ -119,7 +124,6 @@ type syncSummaryJSON struct {
 	UpToDate int `json:"up_to_date"`
 	Updates  int `json:"updates_available"`
 	Updated  int `json:"updated"`
-	Deferred int `json:"source_build_required"`
 	Skipped  int `json:"manual_skipped"`
 	Failed   int `json:"failed"`
 }
@@ -139,7 +143,6 @@ func printSyncJSON(rep service.Report) error {
 			UpToDate: rep.UpToDate,
 			Updates:  rep.Updates,
 			Updated:  rep.Updated,
-			Deferred: rep.SourceBuild,
 			Skipped:  rep.Skipped,
 			Failed:   rep.Failed,
 		},

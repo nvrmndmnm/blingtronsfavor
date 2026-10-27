@@ -132,6 +132,49 @@ const metaAliasForms = `[
   {"type": "classic-era", "filename": "Widget_1.3.0_Classic.zip", "no_lib": false}
 ]`
 
+// releasesUniversal records a universal-package release: one untagged zip
+// serving several game flavors (recorded from DeadlyBossMods/DeadlyBossMods
+// 12.1.17, whose release.json lists one "metadata" flavor/interface row per
+// client — Forever at interface 16001 included).
+const releasesUniversal = `[
+  {
+    "tag_name": "12.1.17",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-03-01T12:00:00Z",
+    "assets": [
+      {"name": "release.json", "size": 460, "browser_download_url": "{{BASE}}/assets/release.json", "content_type": "application/json"},
+      {"name": "DBM-Core-12.1.17.zip", "size": 2048, "browser_download_url": "{{BASE}}/assets/DBM-Core-12.1.17.zip", "content_type": "application/zip"}
+    ]
+  }
+]`
+
+// metaUniversal is the recorded release.json of releasesUniversal: one
+// untagged zip whose nested "metadata" list enumerates every flavor it
+// serves — supported ones (mists, mainline, classic, forever), foreign ones
+// (titan, wrath, cata, bcc) and a duplicate mainline row.
+const metaUniversal = `{
+  "releases": [
+    {
+      "name": "DBM - Core",
+      "version": "12.1.17",
+      "filename": "DBM-Core-12.1.17.zip",
+      "nolib": false,
+      "metadata": [
+        {"flavor": "mists", "interface": 50504},
+        {"flavor": "titan", "interface": 38002},
+        {"flavor": "mainline", "interface": 120100},
+        {"flavor": "mainline", "interface": 120105},
+        {"flavor": "wrath", "interface": 30405},
+        {"flavor": "cata", "interface": 40402},
+        {"flavor": "classic", "interface": 11509},
+        {"flavor": "bcc", "interface": 20506},
+        {"flavor": "forever", "interface": 16001}
+      ]
+    }
+  ]
+}`
+
 // releasesHeuristic is a recorded release without release.json: selection
 // falls back to zip-name heuristics over multi-flavor assets.
 const releasesHeuristic = `[
@@ -263,6 +306,23 @@ const releasesForeignOnly = `[
   }
 ]`
 
+// TestRecordedMetaFixturesParse guards the recorded release.json payloads
+// against transcription errors: ParseMeta fails soft in production (a
+// malformed metadata asset falls back to zip-name heuristics), so a broken
+// fixture would surface as a confusing resolution failure instead of a parse
+// error.
+func TestRecordedMetaFixturesParse(t *testing.T) {
+	for name, body := range map[string]string{
+		"metaMultiFlavor": metaMultiFlavor,
+		"metaAliasForms":  metaAliasForms,
+		"metaUniversal":   metaUniversal,
+	} {
+		if _, err := ParseMeta([]byte(body)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
 // ---- resolution tests ----
 
 // TestResolveReleaseJSONFlavorSelection covers plan §2 step 1: with a
@@ -304,6 +364,38 @@ func TestResolveReleaseJSONAliasForms(t *testing.T) {
 
 	plan = resolveFixture(t, srv, Request{Owner: "acme", Repo: "widget", Flavor: client.FlavorClassic})
 	wantAsset(t, plan, "Widget_1.3.0_Classic.zip")
+}
+
+// TestResolveUniversalPackageMetadata covers the universal-package
+// release.json schema (recorded from DeadlyBossMods/DeadlyBossMods): one
+// untagged zip declares a nested per-flavor "metadata" list, so every flavor
+// it lists — Forever included — resolves to that zip via release.json
+// instead of "source build required" (the zip name alone would be untagged
+// and serve mainline only). Foreign spellings (titan, wrath, cata, bcc) in
+// the list neither disqualify the package nor serve on their own.
+func TestResolveUniversalPackageMetadata(t *testing.T) {
+	srv := newFixture(t, releasesUniversal, map[string]string{"release.json": metaUniversal})
+
+	for _, flavor := range []client.Flavor{client.FlavorForever, client.FlavorClassic, client.FlavorMists, client.FlavorMainline} {
+		plan := resolveFixture(t, srv, Request{Owner: "acme", Repo: "widget", Flavor: flavor})
+		wantAsset(t, plan, "DBM-Core-12.1.17.zip")
+		if plan.Version != "12.1.17" {
+			t.Errorf("flavor %s: Version = %q, want 12.1.17", flavor, plan.Version)
+		}
+		for _, want := range []string{"release.json", "flavor " + string(flavor)} {
+			if !strings.Contains(plan.Reason, want) {
+				t.Errorf("flavor %s: Reason = %q, want it to mention %q", flavor, plan.Reason, want)
+			}
+		}
+	}
+
+	// Without release.json the untagged zip is the mainline package and a
+	// flavor only the metadata declared still needs a source build.
+	srvHeuristic := newFixture(t, releasesUniversal, map[string]string{})
+	plan := resolveFixture(t, srvHeuristic, Request{Owner: "acme", Repo: "widget", Flavor: client.FlavorForever})
+	if plan.Strategy != state.StrategySourcePkgmeta {
+		t.Fatalf("no release.json: Strategy = %q, want %q", plan.Strategy, state.StrategySourcePkgmeta)
+	}
 }
 
 // TestResolveZipHeuristics covers plan §2 step 2: without release.json the
@@ -409,7 +501,7 @@ func TestResolveSkipsDrafts(t *testing.T) {
 
 // TestResolveFallsBackToSourceBuild: when no release asset serves the flavor
 // the plan is a source-pkgmeta build with a "source build required" reason
-// and the tracked ref — the shape "bfctl sync" skips cleanly until M4.
+// and the tracked ref — built from source on the next install.
 func TestResolveFallsBackToSourceBuild(t *testing.T) {
 	srv := newFixture(t, releasesForeignOnly, map[string]string{})
 
@@ -428,6 +520,91 @@ func TestResolveFallsBackToSourceBuild(t *testing.T) {
 	}
 	if plan.Ref != "develop" {
 		t.Errorf("Ref = %q, want the tracked branch develop", plan.Ref)
+	}
+}
+
+// TestResolveSourcePlanVersionStamps pins the version stamp of source-pkgmeta
+// plans: a tag ref stamps the tag name (tags are immutable), a branch ref
+// stamps the short SHA of its HEAD commit (so callers rebuild exactly when
+// the branch moves), and an unanchored plan tracks the repository's default
+// branch.
+func TestResolveSourcePlanVersionStamps(t *testing.T) {
+	const (
+		shaTag  = "1111111111111111111111111111111111111111"
+		shaHead = "abcdef12abcdef12abcdef12abcdef12abcdef12"
+		shaOld  = "9999999999999999999999999999999999999999"
+	)
+	for _, tc := range []struct {
+		name       string
+		api        staleAPI
+		req        Request
+		wantRef    string
+		wantVer    string
+		wantReason string
+	}{
+		{
+			name: "tag ref stamps the tag name",
+			api: staleAPI{
+				branch: "master",
+				tags:   []github.Tag{{Name: "v1.2", Commit: github.TagCommit{SHA: shaTag}}},
+				commits: map[string]github.Commit{
+					shaTag:   staleCommit(shaTag, staleTime(1)),
+					"master": staleCommit(shaHead, staleTime(2)),
+				},
+			},
+			req:        Request{Owner: "demo", Repo: "addon", Flavor: client.FlavorForever, DefaultBranch: "master"},
+			wantRef:    "v1.2",
+			wantVer:    "v1.2",
+			wantReason: "no releases",
+		},
+		{
+			name: "branch ref stamps the short SHA",
+			api: staleAPI{
+				branch: "master",
+				tags:   []github.Tag{{Name: "v1.0", Commit: github.TagCommit{SHA: shaOld}}},
+				commits: map[string]github.Commit{
+					shaOld:   staleCommit(shaOld, staleTime(2)),
+					"master": staleCommit(shaHead, staleTime(1)),
+				},
+			},
+			req:        Request{Owner: "demo", Repo: "addon", Flavor: client.FlavorForever, DefaultBranch: "master"},
+			wantRef:    "master",
+			wantVer:    "abcdef12",
+			wantReason: "no releases",
+		},
+		{
+			name: "pinned plan tracks the default branch",
+			api: staleAPI{
+				branch:  "master",
+				commits: map[string]github.Commit{"master": staleCommit(shaHead, staleTime(1))},
+			},
+			req: Request{
+				Owner: "demo", Repo: "addon", Flavor: client.FlavorForever,
+				Tracking: "stable", PinnedStrategy: state.StrategySourcePkgmeta,
+			},
+			wantRef:    "master",
+			wantVer:    "abcdef12",
+			wantReason: "pinned to strategy source-pkgmeta",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, err := newStaleResolver(t, tc.api).Resolve(context.Background(), tc.req)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if plan.Strategy != state.StrategySourcePkgmeta {
+				t.Fatalf("Strategy = %q, want %q (reason: %s)", plan.Strategy, state.StrategySourcePkgmeta, plan.Reason)
+			}
+			if plan.Ref != tc.wantRef {
+				t.Errorf("Ref = %q, want %q", plan.Ref, tc.wantRef)
+			}
+			if plan.Version != tc.wantVer {
+				t.Errorf("Version = %q, want %q", plan.Version, tc.wantVer)
+			}
+			if !strings.Contains(plan.Reason, tc.wantReason) {
+				t.Errorf("Reason = %q, want substring %q", plan.Reason, tc.wantReason)
+			}
+		})
 	}
 }
 

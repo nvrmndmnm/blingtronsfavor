@@ -2,9 +2,10 @@
 // which release asset to install for a client flavor, and why. The release
 // strategy (M3) selects a packaged release asset — via the release.json
 // metadata BigWigsMods/packager attaches first, zip-name heuristics second.
-// The source-pkgmeta strategy (M4) is planned here only: a repository whose
-// Plan needs a source build surfaces as "source build required" so callers can
-// skip it cleanly until source builds land.
+// The source-pkgmeta strategy (M4) builds the repository at the planned ref
+// through the packager pipeline (internal/packager) — it is planned here and
+// executed by the service layer when no release asset can serve the flavor or
+// the staleness detector finds the releases stale.
 package resolver
 
 import (
@@ -25,8 +26,10 @@ import (
 const downloadTimeout = 5 * time.Minute
 
 // Plan is one resolution result: what to install for an addon source and why.
-// It is forward-compatible with M4: Strategy "release" downloads URL;
-// Strategy "source-pkgmeta" builds URL at Ref.
+// Strategy "release" downloads URL; Strategy "source-pkgmeta" builds URL at
+// Ref through the packager pipeline. Version is the version to record for
+// either — the release tag, or a source build's tag/commit stamp — so callers
+// can detect whether anything changed before installing.
 type Plan struct {
 	Strategy state.Strategy // "release" | "source-pkgmeta"
 	Version  string         // tag or version
@@ -144,12 +147,13 @@ func (r *Resolver) httpClient() *http.Client {
 }
 
 // Resolve runs the resolution order of the plan (spec §2) for one repository
-// and flavor: the M4 staleness detector first (a stale repository switches to
+// and flavor: the staleness detector first (a stale repository switches to
 // a source-pkgmeta build at the newest tag / branch HEAD), then release.json
 // metadata, zip-name heuristics second, and a source-pkgmeta Plan (with a
 // "source build required" reason) when no release asset can serve the flavor.
 // Only API and download failures are errors; a repository that needs a source
-// build resolves to a well-formed Plan. A failure inside the staleness check
+// build resolves to a well-formed Plan with the ref and version stamp its
+// build produces. A failure inside the staleness check
 // degrades to plain release resolution — the detector must never break
 // installs — but a configured strategy pin is always honored.
 func (r *Resolver) Resolve(ctx context.Context, req Request) (Plan, error) {
@@ -160,37 +164,70 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, fmt.Errorf("resolve %s/%s: %w", req.Owner, req.Repo, err)
 	}
-	ref := RepoRef{Owner: req.Owner, Repo: req.Repo}
-	branch := req.Tracking
-	if branch == "" || branch == trackingStable || branch == trackingRelease {
-		branch = req.DefaultBranch
-	}
-	if branch == "" {
-		branch = "main"
-	}
 	if req.PinnedStrategy == state.StrategySourcePkgmeta {
-		return Plan{
-			Strategy: state.StrategySourcePkgmeta,
-			URL:      ref.URL() + ".git",
-			Ref:      branch,
-			Reason:   "pinned to strategy " + string(state.StrategySourcePkgmeta),
-		}, nil
+		return r.sourcePlan(ctx, req, r.sourceRef(ctx, req), "pinned to strategy "+string(state.StrategySourcePkgmeta)), nil
 	}
 	if d, err := r.CheckStale(ctx, req, releases); err == nil && d.Trigger {
-		return Plan{
-			Strategy: state.StrategySourcePkgmeta,
-			URL:      ref.URL() + ".git",
-			Ref:      d.Ref,
-			Reason:   d.Reason,
-		}, nil
+		return r.sourcePlan(ctx, req, d.Ref, d.Reason), nil
 	}
 	if best := r.pick(ctx, releases, req); best != nil {
 		return best.plan(), nil
 	}
+	return r.sourcePlan(ctx, req, r.sourceRef(ctx, req),
+		fmt.Sprintf("source build required: no release asset matches flavor %s", req.Flavor)), nil
+}
+
+// sourcePlan assembles a source-pkgmeta plan at ref: the git URL to build,
+// the ref, its version stamp and the reason shown by --explain.
+func (r *Resolver) sourcePlan(ctx context.Context, req Request, ref, reason string) Plan {
 	return Plan{
 		Strategy: state.StrategySourcePkgmeta,
-		URL:      ref.URL() + ".git",
-		Ref:      branch,
-		Reason:   fmt.Sprintf("source build required: no release asset matches flavor %s", req.Flavor),
-	}, nil
+		URL:      RepoRef{Owner: req.Owner, Repo: req.Repo}.URL() + ".git",
+		Ref:      ref,
+		Version:  r.sourceVersion(ctx, req, ref),
+		Reason:   reason,
+	}
+}
+
+// sourceRef picks the git ref a source build tracks when the plan is not
+// anchored to a concrete tag: the explicitly tracked branch, the
+// repository's default branch, or "main" as the last resort.
+func (r *Resolver) sourceRef(ctx context.Context, req Request) string {
+	if t := req.Tracking; t != "" && t != trackingStable && t != trackingRelease {
+		return t
+	}
+	if req.DefaultBranch != "" {
+		return req.DefaultBranch
+	}
+	if repo, err := r.GH.Repository(ctx, req.Owner, req.Repo); err == nil && repo.DefaultBranch != "" {
+		return repo.DefaultBranch
+	}
+	return "main"
+}
+
+// sourceVersion stamps a source-pkgmeta plan with the version the build
+// produces, so callers can detect updates without rebuilding: the ref itself
+// when it is a tag (tags are immutable), otherwise the short SHA of the
+// commit the ref points at (a branch ref moves when the branch does). A
+// lookup failure leaves Version empty: callers then rebuild rather than
+// silently consider the addon up to date.
+func (r *Resolver) sourceVersion(ctx context.Context, req Request, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	if tags, err := r.GH.Tags(ctx, req.Owner, req.Repo); err == nil {
+		for _, tag := range tags {
+			if tag.Name == ref {
+				return ref
+			}
+		}
+	}
+	commit, err := r.GH.HeadCommit(ctx, req.Owner, req.Repo, ref)
+	if err != nil || commit.SHA == "" {
+		return ""
+	}
+	if len(commit.SHA) > 8 {
+		return commit.SHA[:8]
+	}
+	return commit.SHA
 }
