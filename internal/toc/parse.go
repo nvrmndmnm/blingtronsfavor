@@ -16,9 +16,14 @@ import (
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 // knownSuffixes are the flavor-specific toc suffixes, e.g. "DeadlyBossMods_
-// Mainline.toc". The order is the fallback precedence when a directory ships
-// several foreign-flavor tocs.
-var knownSuffixes = []string{"_Mainline", "_Vanilla", "_Classic", "_Mists", "_Camelot", "_Forever"}
+// Mainline.toc": the suffixes of the flavors bfctl serves first, then the
+// remaining flavor suffixes WoW's flavor mechanism uses — "_TBC", "_Wrath"
+// and "_Cata" ship in real multi-flavor packages (verified live: WeakAuras'
+// classic bundle carries Vanilla/TBC/Wrath/Cata/Mists tocs, eqol's TBC
+// package carries "EnhanceQoL_TBC.toc") and must split like the rest even
+// though bfctl manages no client for them. The order is the fallback
+// precedence when a directory ships several foreign-flavor tocs.
+var knownSuffixes = []string{"_Mainline", "_Vanilla", "_Classic", "_Mists", "_Camelot", "_Forever", "_TBC", "_Wrath", "_Cata"}
 
 // Toc is a parsed .toc addon manifest.
 type Toc struct {

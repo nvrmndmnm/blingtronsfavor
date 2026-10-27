@@ -124,10 +124,10 @@ func Select(dir string, flavor client.Flavor) (*Toc, error) {
 		if err != nil {
 			return nil, err
 		}
-		rank, suffixRank := 2, len(knownSuffixes)
+		rank, suffixRank := 2, slices.Index(knownSuffixes, parsed.Suffix)
 		switch parsed.Suffix {
 		case "":
-			rank = 1
+			rank, suffixRank = 1, len(knownSuffixes)
 		default:
 			if i := slices.Index(suffixesByFlavor[flavor], parsed.Suffix); i >= 0 {
 				rank, suffixRank = 0, i

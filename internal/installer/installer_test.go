@@ -399,6 +399,37 @@ func TestAtomicRejectsMismatchedToc(t *testing.T) {
 	}
 }
 
+// TestAtomicAcceptsForeignFlavorSet is the acceptance side of staged
+// validation: a directory carrying a plain .toc plus flavor-suffixed
+// variants of clients bfctl does not manage is a valid flavor set (verified
+// live: the Wago "EnhanceQoL" package ships EnhanceQoL.toc +
+// EnhanceQoL_TBC.toc) and must install, not be rejected as a name mismatch.
+func TestAtomicAcceptsForeignFlavorSet(t *testing.T) {
+	in, _, flavor, root := testSetup(t)
+	addonsDir := filepath.Join(root, "Interface", "AddOns")
+
+	src := filepath.Join(t.TempDir(), "payload")
+	if err := os.MkdirAll(filepath.Join(src, "EnhanceQoL"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, toc := range []string{"EnhanceQoL.toc", "EnhanceQoL_TBC.toc"} {
+		if err := os.WriteFile(filepath.Join(src, "EnhanceQoL", toc), []byte("## Interface: 20506\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := Request{
+		Flavor:    flavor,
+		Addon:     state.AddonState{ID: "eqol", Strategy: state.StrategyRelease},
+		SourceDir: src,
+	}
+	if err := in.Install(context.Background(), req); err != nil {
+		t.Fatalf("install with a plain + _TBC flavor set: %v", err)
+	}
+	if got := dirNames(t, addonsDir); len(got) != 1 || got[0] != "EnhanceQoL" {
+		t.Fatalf("after install: addons = %v, want [EnhanceQoL]", got)
+	}
+}
+
 // TestAtomicReconcileCrashRollback simulates a crash mid-swap (phase
 // "swapping"): the next run's reconciliation must restore the exact prior
 // tree and clean the transaction up.
