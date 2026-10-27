@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
@@ -125,12 +127,7 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 			plan := outcome.plan
 			r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
 			switch {
-			// Release assets and provider packages (direct) install; a pure
-			// source build does not and stays distinct in the report.
-			case plan.Strategy != state.StrategyRelease && plan.Strategy != state.StrategyDirect:
-				r.Kind = ResultSourceBuild
-				rep.SourceBuild++
-			case plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag:
+			case plan.Version != "" && (plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag):
 				r.Kind = ResultUpToDate
 				rep.UpToDate++
 			case opts.CheckOnly:
@@ -164,11 +161,12 @@ func newResolver() (*resolver.Resolver, error) {
 }
 
 // installUpdate downloads and unpacks the plan's payload — a GitHub release
-// asset through the resolver, a provider package through provider.Fetch —
-// and installs it atomically through the installer, recording the new
-// version, the upstream tag and the upstream changelog (the Tukui/Wago
-// inline text precedent; never a signed download link) on the addon's
-// existing state entry.
+// asset through the resolver, a provider package through provider.Fetch, a
+// source build composed locally through the packager pipeline — and installs
+// it atomically through the installer, recording the new version, the
+// upstream tag and the upstream changelog (the Tukui/Wago inline text
+// precedent; never a signed download link) on the addon's existing state
+// entry.
 func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult) error {
 	dir, err := os.MkdirTemp("", "bfctl-sync-")
 	if err != nil {
@@ -181,15 +179,26 @@ func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, o
 			return err
 		}
 		root = dir // provider.Fetch unpacks into dest itself
-	} else {
+	} else if outcome.plan.Strategy == state.StrategyRelease {
 		root, err = res.Fetch(ctx, outcome.plan, dir)
 		if err != nil {
 			return err
 		}
+	} else {
+		// A source-pkgmeta plan is composed locally through the packager
+		// pipeline (the resolver's Fetch only downloads release assets).
+		ref, err := sourceRepo(task.addon)
+		if err != nil {
+			return err
+		}
+		if err := buildSourcePlan(ctx, outcome.plan, ref, task.flavor, dir); err != nil {
+			return err
+		}
+		root = dir
 	}
 	rec := *task.addon
 	rec.Strategy = outcome.plan.Strategy
-	rec.InstalledVersion = outcome.plan.Version
+	rec.InstalledVersion = versionOr(outcome.plan.Version, outcome.plan.Ref)
 	rec.InstalledCommit = ""
 	rec.ETag = outcome.plan.Version
 	rec.Changelog = outcome.upstream.Changelog

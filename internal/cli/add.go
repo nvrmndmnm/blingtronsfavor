@@ -19,10 +19,6 @@ import (
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
-// stateLockTimeout is how long add waits for the state lock when it only
-// records a manifest entry (mirrors the installer's own timeout).
-const stateLockTimeout = 5 * time.Second
-
 // runAdd implements "bfctl add <source>": GitHub "owner/repo" references
 // and github.com URLs parse into a repository reference, validate that the
 // repository resolves, resolve an install Plan, download and unpack the
@@ -31,9 +27,10 @@ const stateLockTimeout = 5 * time.Second
 // install through the Wago provider and stay bound to it for updates;
 // CurseForge references (the addon page URL or "cfwidget:<key>") install
 // through the cfwidget CurseForge mirror provider and stay bound to it;
-// any other git remote installs through the git-direct provider. A Plan that
-// needs a source build is recorded in the manifest without installing
-// anything and is skipped by sync until source builds land (M4).
+// any other git remote installs through the git-direct provider. A GitHub
+// Plan that needs a source build is composed locally through the packager
+// pipeline (.pkgmeta externals, keyword substitution, TOC flavor split) and
+// installed the same way.
 func runAdd(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("add")
 	branchFlag := fs.String("branch", "", "branch to track instead of stable releases")
