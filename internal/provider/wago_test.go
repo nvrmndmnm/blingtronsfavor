@@ -104,11 +104,16 @@ func TestWagoDataPageParse(t *testing.T) {
 	}
 }
 
-// TestWagoFlavorSelection covers the live quirks: a null flavor field means
-// "no information" (WeakAuras ships supported_retail_patches: null next to
-// populated classic fields), an explicitly empty list means the release does
-// not serve the flavor (Raider.IO is retail-only) and an oddly-shaped field
-// degrades to "no information" instead of failing the payload.
+// TestWagoFlavorSelection pins the per-release flavor rule against the
+// shapes live payloads actually carry (checked against real pages): releases
+// declare exactly the flavors they serve — WeakAuras' classic bundles list
+// classic/cata/wotlk/bc/mop and no retail (their ZIPs ship no retail toc at
+// all), the Raider.IO companion is retail-only, eqol lists one flavor per
+// release — so a populated list is a yes, a present empty list is a no, and
+// a release listing only other flavors does not serve this one. Only a
+// release with no parsable flavor fields at all is "no information": the
+// graceful fallback that keeps an oddly-shaped field from making every
+// release unsatisfiable.
 func TestWagoFlavorSelection(t *testing.T) {
 	fastScrape(t)
 	props := `{"releases":{"data":[
@@ -123,9 +128,9 @@ func TestWagoFlavorSelection(t *testing.T) {
 		flavor client.Flavor
 		want   string
 	}{
-		{client.FlavorMainline, "2.0.0"}, // null retail field: no info, accept
+		{client.FlavorMainline, "1.9.0"}, // 2.0.0 lists classic only — that package is not the retail one
 		{client.FlavorClassic, "2.0.0"},  // classic listed on the newest release
-		{client.FlavorForever, "2.0.0"},  // absent field: no info, accept
+		{client.FlavorForever, "1.8.0"},  // nothing lists forever: the no-information release is the fallback
 	}
 	for _, c := range cases {
 		srv, _ := serveWago(t, func() string { return wagoPageOf(props) })
@@ -149,6 +154,61 @@ func TestWagoFlavorSelection(t *testing.T) {
 	_, err := w.Check(context.Background(), state.SourceRef{Kind: state.SourceWago, Slug: "x"})
 	if err == nil || !strings.Contains(err.Error(), "no stable release supports flavor") {
 		t.Errorf("check = %v, want a no-supported-release error", err)
+	}
+}
+
+// TestWagoRecentReleases pins the per-flavor selection the live payloads
+// require. metadata.recent_releases names each Wago flavor's newest stable
+// release and must win over the paginated list: eqol publishes one release
+// per flavor at every version (13.15.5 / 13.15.5-bcc / 13.15.5-forever,
+// each listing only its own patches), and WeakAuras' retail release is pages
+// behind its classic bundles — so "the newest entry whose flavor fields
+// match" hands the user the wrong flavor's package.
+func TestWagoRecentReleases(t *testing.T) {
+	fastScrape(t)
+
+	// eqol shape: one release per flavor, recent_releases naming all three.
+	props := `{"metadata":{"recent_releases":{
+		"retail":{"label":"13.15.5","changelog":"retail notes","download_link":"https://cdn.invalid/retail.zip","supported_retail_patches":["12.1.5"]},
+		"bc":{"label":"13.15.5-bcc","changelog":"bcc notes","download_link":"https://cdn.invalid/bcc.zip","supported_bc_patches":["2.5.6"]},
+		"forever":{"label":"13.15.5-forever","changelog":"forever notes","download_link":"https://cdn.invalid/forever.zip","supported_forever_patches":["1.60.1"]}}},
+	"releases":{"data":[
+		{"id":"b","label":"13.15.5-bcc","stability":"stable","changelog":"bcc notes","download_link":"https://cdn.invalid/bcc.zip","supported_bc_patches":["2.5.6"]},
+		{"id":"f","label":"13.15.5-forever","stability":"stable","changelog":"forever notes","download_link":"https://cdn.invalid/forever.zip","supported_forever_patches":["1.60.1"]},
+		{"id":"r","label":"13.15.5","stability":"stable","changelog":"retail notes","download_link":"https://cdn.invalid/retail.zip","supported_retail_patches":["12.1.5"]}
+	]}}`
+	srv, _ := serveWago(t, func() string { return wagoPageOf(props) })
+	w := &Wago{Base: srv.URL, Flavor: client.FlavorForever}
+	rel, err := w.release(context.Background(), "eqol")
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if rel.Label != "13.15.5-forever" || rel.Download != "https://cdn.invalid/forever.zip" {
+		t.Errorf("release = %+v, want the forever package", rel)
+	}
+
+	// WeakAuras shape: the newest entries are classic bundles (retail
+	// null) and the retail release only exists in recent_releases.
+	props = `{"metadata":{"recent_releases":{
+		"retail":{"label":"5.21.1","changelog":"retail notes","download_link":"https://cdn.invalid/wa-retail.zip","supported_retail_patches":["11.2.7"]}}},
+	"releases":{"data":[
+		{"id":"c","label":"5.22.1","stability":"stable","changelog":"classic bundle","download_link":"https://cdn.invalid/wa-classic.zip","supported_cata_patches":["4.4.5"],"supported_wotlk_patches":["3.4.5"],"supported_bc_patches":["2.5.6"],"supported_classic_patches":["1.15.8"],"supported_mop_patches":["5.5.5"],"supported_retail_patches":null}
+	]}}`
+	srv2, _ := serveWago(t, func() string { return wagoPageOf(props) })
+	w2 := &Wago{Base: srv2.URL, Flavor: client.FlavorMainline}
+	rel, err = w2.release(context.Background(), "weakauras")
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if rel.Label != "5.21.1" || rel.Download != "https://cdn.invalid/wa-retail.zip" {
+		t.Errorf("release = %+v, want the retail release from recent_releases", rel)
+	}
+
+	// eqol serves no classic client at all: a clean per-addon error, not
+	// the wrong flavor's package.
+	w3 := &Wago{Base: srv.URL, Flavor: client.FlavorClassic}
+	if _, err := w3.release(context.Background(), "eqol"); err == nil || !strings.Contains(err.Error(), "no stable release supports flavor") {
+		t.Errorf("classic release selection: err = %v, want a per-addon unsupported error", err)
 	}
 }
 
@@ -319,10 +379,10 @@ func TestWagoDecodesRelease(t *testing.T) {
 	if rel.Label != "1.2.3" || rel.Changelog != "note" || rel.Download != "https://cdn.invalid/x.zip" {
 		t.Errorf("release = %+v", rel)
 	}
-	if !rel.supports(client.FlavorMainline) {
-		t.Error("retail patches listed, want supports(mainline)")
+	if rel.stance(client.FlavorMainline) != stanceYes {
+		t.Errorf("stance(mainline) = %d, want yes: retail patches listed", rel.stance(client.FlavorMainline))
 	}
-	if !rel.supports(client.FlavorClassic) {
-		t.Error("null classic patches = no information, want supports(classic)")
+	if rel.stance(client.FlavorClassic) != stanceNo {
+		t.Errorf("stance(classic) = %d, want no: the release lists retail only", rel.stance(client.FlavorClassic))
 	}
 }

@@ -36,8 +36,10 @@ type Wago struct {
 	// Base overrides the site base (tests point it at a stub).
 	Base string
 
-	// Flavor selects the newest stable release that lists support for the
-	// client flavor; the zero value takes the newest release unfiltered.
+	// Flavor selects the release that serves the client flavor (see pick):
+	// the newest stable one listing it in "supported_<key>_patches", or the
+	// one metadata.recent_releases names for it. The zero value takes the
+	// newest release unfiltered.
 	Flavor client.Flavor
 
 	// HTTP is the download client; nil selects a bounded default.
@@ -45,32 +47,39 @@ type Wago struct {
 }
 
 // wagoPage is the subset of the Inertia data-page payload bfctl needs: the
-// props.releases Laravel paginator of the versions endpoint.
+// props.releases Laravel paginator of the versions endpoint and the
+// props.metadata.recent_releases map, which names the newest stable release
+// per Wago flavor key directly.
 type wagoPage struct {
 	Props struct {
 		Releases *struct {
 			Data []wagoRelease `json:"data"`
 		} `json:"releases"`
+		Metadata *struct {
+			RecentReleases map[string]wagoRelease `json:"recent_releases"`
+		} `json:"metadata"`
 	} `json:"props"`
 }
 
-// wagoRelease is one release entry of props.releases.data: its label (the
-// version to compare), the inline markdown changelog, the pre-signed
-// download link and the per-release flavor support fields. Fields bfctl does
-// not need are ignored.
+// wagoRelease is one release entry of props.releases.data — or of
+// props.metadata.recent_releases: its label (the version to compare), the
+// inline markdown changelog, the pre-signed download link and the
+// per-release flavor support fields. Fields bfctl does not need are ignored.
 type wagoRelease struct {
-	ID        string                     // release id
-	Label     string                     // version label, e.g. "5.19.0"
-	Stability string                     // "stable", "beta", "alpha"
-	Changelog string                     // inline markdown changelog
-	CreatedAt string                     // release timestamp
-	Download  string                     // pre-signed download link (expires ~2h)
-	Patches   map[client.Flavor][]string // "supported_<flavor>_patches" by flavor key
+	ID        string              // release id
+	Label     string              // version label, e.g. "5.19.0"
+	Stability string              // "stable", "beta", "alpha"
+	Changelog string              // inline markdown changelog
+	CreatedAt string              // release timestamp
+	Download  string              // pre-signed download link (expires ~2h)
+	Patches   map[string][]string // "supported_<key>_patches" by Wago flavor key
 }
 
-// wagoFlavorKeys are the per-release flavor support fields observed on the
-// versions payload ("supported_<key>_patches"); extra flavors bfctl does not
-// serve (cata, wotlk, bc) are simply never looked up.
+// wagoFlavorKeys maps each client flavor bfctl serves to its Wago flavor
+// key (the "supported_<key>_patches" field and the metadata.recent_releases
+// key). The payload carries more keys (cata, wotlk, bc); those land in
+// wagoRelease.Patches too, because which flavors a release serves is part
+// of the selection rule.
 var wagoFlavorKeys = map[client.Flavor]string{
 	client.FlavorMainline: "retail",
 	client.FlavorForever:  "forever",
@@ -79,13 +88,13 @@ var wagoFlavorKeys = map[client.Flavor]string{
 }
 
 // UnmarshalJSON decodes one release defensively: the fields bfctl needs are
-// taken as strings, and each "supported_<flavor>_patches" entry is captured
+// taken as strings, and every "supported_<key>_patches" entry is captured
 // raw so an absent, null or oddly-shaped field degrades to "no information"
 // instead of failing the whole payload (flavor field quirks are expected).
 // A present but empty list is information: the release does not serve that
-// flavor. The live data showed both shapes — WeakAuras ships
-// "supported_retail_patches: null" next to populated classic fields, and
-// Raider.IO is retail-only.
+// flavor. The keys cover every Wago flavor key — retail, cata, wotlk, bc,
+// classic, mop, forever — not only the ones bfctl serves, because serving
+// other flavors is part of the selection rule (see stance).
 func (r *wagoRelease) UnmarshalJSON(b []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -105,9 +114,13 @@ func (r *wagoRelease) UnmarshalJSON(b []byte) error {
 	r.CreatedAt = str("created_at")
 	r.Download = str("download_link")
 	r.Patches = nil
-	for flavor, wagoKey := range wagoFlavorKeys {
-		v, ok := raw["supported_"+wagoKey+"_patches"]
-		if !ok || string(v) == "null" {
+	for key, v := range raw {
+		flavorKey, ok := strings.CutPrefix(key, "supported_")
+		if !ok || !strings.HasSuffix(flavorKey, "_patches") {
+			continue
+		}
+		flavorKey = strings.TrimSuffix(flavorKey, "_patches")
+		if string(v) == "null" {
 			continue // absent or null: no information
 		}
 		var list []string
@@ -115,23 +128,47 @@ func (r *wagoRelease) UnmarshalJSON(b []byte) error {
 			continue // oddly shaped: degrade to no information
 		}
 		if r.Patches == nil {
-			r.Patches = make(map[client.Flavor][]string, len(wagoFlavorKeys))
+			r.Patches = make(map[string][]string)
 		}
-		r.Patches[flavor] = list
+		r.Patches[flavorKey] = list
 	}
 	return nil
 }
 
-// supports reports whether the release lists support for flavor: an absent,
-// null or unparsable flavor field counts as supporting it (degrade gracefully
-// over a missing field), a present non-empty patch list is a yes, and a
-// present empty list is a no.
-func (r *wagoRelease) supports(flavor client.Flavor) bool {
-	if flavor == "" || r.Patches == nil {
-		return true
+// flavorStance classifies one release against a requested client flavor.
+type flavorStance int
+
+const (
+	stanceYes     flavorStance = iota // the release lists support for the flavor
+	stanceNo                          // the release does not serve the flavor
+	stanceUnknown                     // the release carries no flavor information
+)
+
+// stance reports how the release relates to flavor. Live payloads show
+// releases declare exactly the flavors they serve through their
+// "supported_<key>_patches" lists — eqol ships one release per flavor and
+// each lists only its own patches, and WeakAuras' classic bundle lists
+// cata/wotlk/bc/classic/mop while its ZIP ships no retail toc at all — so a
+// non-empty list is a yes, a present empty list is a no, and a release that
+// lists other flavors but not this one does not serve it either. Only a
+// release with no parsable flavor fields at all is unknown; it stays usable
+// as a graceful fallback so a changed payload shape can never make every
+// release unsatisfiable.
+func (r *wagoRelease) stance(flavor client.Flavor) flavorStance {
+	if flavor == "" {
+		return stanceYes // unfiltered: newest wins
 	}
-	list, ok := r.Patches[flavor]
-	return !ok || len(list) > 0
+	list, ok := r.Patches[wagoFlavorKeys[flavor]]
+	if ok {
+		if len(list) > 0 {
+			return stanceYes
+		}
+		return stanceNo
+	}
+	if len(r.Patches) > 0 {
+		return stanceNo // serves other flavors only
+	}
+	return stanceUnknown
 }
 
 // base returns the site base the provider scrapes.
@@ -147,10 +184,11 @@ func (w *Wago) versionsURL(slug string) string {
 	return w.base() + "/addons/" + url.PathEscape(slug) + "/versions?stability=stable"
 }
 
-// Check reports the newest stable release of the addon: the release label as
-// the version, its inline markdown changelog and a fresh pre-signed download
-// link. The link is short-lived (it expires roughly two hours after the page
-// is served) and must be used promptly — it is never cached or persisted.
+// Check reports the stable release that serves the configured flavor: its
+// label as the version, the inline markdown changelog and a fresh
+// pre-signed download link. The link is short-lived (it expires roughly two
+// hours after the page is served) and must be used promptly — it is never
+// cached or persisted.
 func (w *Wago) Check(ctx context.Context, ref state.SourceRef) (Upstream, error) {
 	rel, err := w.release(ctx, ref.Slug)
 	if err != nil {
@@ -180,9 +218,9 @@ func (w *Wago) Fetch(ctx context.Context, ref state.SourceRef, dest string) erro
 	return err
 }
 
-// release scrapes the versions page and returns the newest stable release
-// that supports w.Flavor. The page is re-read on every call: signed download
-// links are only valid shortly after page load and must never be cached.
+// release scrapes the versions page and returns the release to install for
+// w.Flavor. The page is re-read on every call: signed download links are
+// only valid shortly after page load and must never be cached.
 func (w *Wago) release(ctx context.Context, slug string) (wagoRelease, error) {
 	if slug == "" {
 		return wagoRelease{}, errors.New("wago: source carries no addon id")
@@ -195,19 +233,49 @@ func (w *Wago) release(ctx context.Context, slug string) (wagoRelease, error) {
 	if releases == nil {
 		return wagoRelease{}, fmt.Errorf("wago %s: versions page carries no releases payload (unknown addon or changed page shape)", slug)
 	}
-	for _, rel := range releases.Data {
-		if rel.Label == "" || rel.Download == "" {
-			continue
-		}
-		if !rel.supports(w.Flavor) {
-			continue
-		}
+	if rel, ok := w.pick(page); ok {
 		return rel, nil
 	}
 	if len(releases.Data) == 0 {
 		return wagoRelease{}, fmt.Errorf("wago %s: no stable releases", slug)
 	}
 	return wagoRelease{}, fmt.Errorf("wago %s: no stable release supports flavor %q", slug, w.Flavor)
+}
+
+// pick selects the release that serves w.Flavor. metadata.recent_releases
+// names each Wago flavor's newest stable release directly and wins: the
+// flavors' releases interleave in the paginated list (eqol ships one release
+// per flavor at every version, WeakAuras' retail release is pages behind its
+// classic bundles), so "the newest entry whose flavor fields happen to
+// match" would pick the wrong flavor's package. Without that metadata the
+// list is scanned newest-first: an explicitly listed flavor wins, then a
+// release with no flavor information at all; releases serving only other
+// flavors are skipped (see wagoRelease.stance).
+func (w *Wago) pick(page wagoPage) (wagoRelease, bool) {
+	if w.Flavor != "" && page.Props.Metadata != nil {
+		if rel, ok := page.Props.Metadata.RecentReleases[wagoFlavorKeys[w.Flavor]]; ok && rel.Label != "" && rel.Download != "" {
+			return rel, true
+		}
+	}
+	var fallback *wagoRelease
+	for i := range page.Props.Releases.Data {
+		rel := &page.Props.Releases.Data[i]
+		if rel.Label == "" || rel.Download == "" {
+			continue
+		}
+		switch rel.stance(w.Flavor) {
+		case stanceYes:
+			return *rel, true
+		case stanceUnknown:
+			if fallback == nil {
+				fallback = rel
+			}
+		}
+	}
+	if fallback != nil {
+		return *fallback, true
+	}
+	return wagoRelease{}, false
 }
 
 // page fetches and parses one versions page's data-page payload.
