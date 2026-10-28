@@ -1,4 +1,4 @@
-.Dd October 26, 2025
+.Dd October 28, 2026
 .Dt BFCTL 1
 .Os
 .Sh NAME
@@ -178,6 +178,46 @@ and an aggregate
 .Va summary .
 Both are stable interfaces intended for
 .Xr jq 1 .
+.Sh PROGRESS OUTPUT
+While
+.Cm sync , Cm add
+or
+.Cm adopt
+works, ongoing activity is reported on standard error as it happens: on a
+terminal as one live status line
+.Pq spinner, rewritten in place ,
+otherwise
+.Pq pipe, CI log, file
+as one incremental plain line per event, without ANSI or other control
+bytes:
+.Bd -literal -offset indent
+progress: <index>/<total> <flavor>/<addon>: <phase>[: <detail>]
+.Ed
+.Pp
+.Ar phase
+is one of
+.Ar resolving , downloading , installing , done , failed , skipped ;
+.Ar detail
+names the version or ref in flight, the failure or skip reason, or a
+rate-limit wait.
+.Fl q , -quiet
+suppresses progress entirely.
+.Pp
+Stream discipline: results and the
+.Fl -json
+report stay alone on standard output; progress and logs use standard
+error.
+The per-addon result lines and the summary keep their historical format,
+and redirected output stays plain and parseable, so
+.Nm
+output is safe to pipe
+.Pq e.g. into jq
+or capture.
+On
+.Dv SIGINT
+the live line is erased and the cursor restored before the rollback
+message prints
+.Pq see Sx SIGNALS .
 .Sh SIGNALS
 .Bl -tag -width SIGINT
 .It Dv SIGINT
