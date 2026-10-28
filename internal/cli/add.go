@@ -28,7 +28,9 @@ import (
 // any other git remote installs through the git-direct provider. A GitHub
 // Plan that needs a source build is composed locally through the packager
 // pipeline (.pkgmeta externals, keyword substitution, TOC flavor split) and
-// installed the same way.
+// installed the same way. While the work runs, progress reports stream to
+// stderr through the shared renderer (deliverable D4); stdout keeps the
+// frozen result lines.
 func runAdd(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("add")
 	branchFlag := fs.String("branch", "", "branch to track instead of stable releases")
@@ -44,6 +46,12 @@ func runAdd(args []string, bi BuildInfo) int {
 		subcommandUsage(fs)
 		return ExitUsage
 	}
+	// One renderer per run: progress on stderr, stdout untouched. "bfctl
+	// add" has no graceful SIGINT path, so the guard only restores the
+	// terminal before the process dies exactly as it otherwise would.
+	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY()})
+	defer prog.Stop()
+	defer interruptGuard(prog)()
 	// Wago Addons references (the addon page URL or "wago:<key>") install
 	// through the Wago provider; the manifest entry records the wago source
 	// so sync keeps maintaining the addon through Wago, even when the
@@ -58,7 +66,7 @@ func runAdd(args []string, bi BuildInfo) int {
 			fmt.Fprintf(os.Stderr, "bfctl add: %v\n", ferr)
 			return ExitUsage
 		}
-		return addWago(key, flavor, *forceFlag)
+		return addWago(key, flavor, *forceFlag, prog)
 	}
 	// CurseForge references (the addon page URL or "cfwidget:<key>") install
 	// through the cfwidget mirror provider; the manifest entry records the
@@ -75,7 +83,7 @@ func runAdd(args []string, bi BuildInfo) int {
 			fmt.Fprintf(os.Stderr, "bfctl add: %v\n", ferr)
 			return ExitUsage
 		}
-		return addCfwidget(key, flavor, *forceFlag)
+		return addCfwidget(key, flavor, *forceFlag, prog)
 	}
 	ref, err := resolver.ParseRepo(fs.Arg(0))
 	if err != nil {
@@ -91,7 +99,7 @@ func runAdd(args []string, bi BuildInfo) int {
 				fmt.Fprintln(os.Stderr, "bfctl add: --branch and --strategy only apply to GitHub repositories")
 				return ExitUsage
 			}
-			return addSourceGit(fs.Arg(0), flavor, *forceFlag)
+			return addSourceGit(fs.Arg(0), flavor, *forceFlag, prog)
 		}
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitUsage
@@ -125,13 +133,17 @@ func runAdd(args []string, bi BuildInfo) int {
 	ctx := context.Background()
 
 	// Validate the repository resolves before planning anything.
-	plan, err := service.PlanAdd(ctx, res, flavor, ref, tracking, nil)
+	plan, err := service.PlanAdd(ctx, res, flavor, ref, tracking, prog.Handle)
 	if err != nil {
+		prog.Stop()
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
 	if *explainFlag {
-		fmt.Printf("plan: %s\n", plan.Reason)
+		// The status line is still live (a successful plan keeps reporting
+		// through InstallPlan), so the plan note goes through Suspend like
+		// every mid-run stdout line.
+		prog.Suspend(func() { fmt.Printf("plan: %s\n", plan.Reason) })
 	}
 
 	rec := state.AddonState{
@@ -141,10 +153,12 @@ func runAdd(args []string, bi BuildInfo) int {
 		Strategy:    plan.Strategy,
 		Tracking:    tracking,
 	}
-	if err := service.InstallPlan(ctx, res, flavor, rec, plan, *forceFlag, nil); err != nil {
+	if err := service.InstallPlan(ctx, res, flavor, rec, plan, *forceFlag, prog.Handle); err != nil {
+		prog.Stop()
 		slog.Error("install", "addon", rec.ID, "error", err)
 		return ExitError
 	}
+	prog.Stop()
 	ver := plan.Version
 	if ver == "" {
 		ver = plan.Ref
@@ -265,8 +279,8 @@ func isSourceGitURL(raw string) bool {
 // addSourceGit installs an arbitrary git repository through the git-direct
 // provider: "git ls-remote" picks the version, a shallow clone feeds the
 // full packager pipeline (TOC splitting, .pkgmeta externals) and the atomic
-// installer commits the result.
-func addSourceGit(raw string, flavor client.Flavor, force bool) int {
+// installer commits the result. Progress for the unit reports through prog.
+func addSourceGit(raw string, flavor client.Flavor, force bool, prog progressRenderer) int {
 	prov, err := providerFor(state.SourceGit, flavor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
@@ -274,11 +288,13 @@ func addSourceGit(raw string, flavor client.Flavor, force bool) int {
 	}
 	id := gitRepoName(raw)
 	ref := state.SourceRef{Kind: state.SourceGit, URL: raw}
-	up, err := service.InstallProvider(context.Background(), prov, ref, id, raw, flavor, force, nil)
+	up, err := service.InstallProvider(context.Background(), prov, ref, id, raw, flavor, force, prog.Handle)
 	if err != nil {
+		prog.Stop()
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
+	prog.Stop()
 	fmt.Printf("added %s %s (%s, source-git)\n", id, up.Version, up.Strategy)
 	return ExitOK
 }
@@ -286,19 +302,22 @@ func addSourceGit(raw string, flavor client.Flavor, force bool) int {
 // addWago installs a Wago Addons package through the Wago provider. The
 // manifest entry records the wago source, so sync keeps maintaining the
 // addon through Wago — the chosen source of truth stays authoritative even
-// when the addon's page lists a GitHub repository that 404s.
-func addWago(key string, flavor client.Flavor, force bool) int {
+// when the addon's page lists a GitHub repository that 404s. Progress for
+// the unit reports through prog.
+func addWago(key string, flavor client.Flavor, force bool, prog progressRenderer) int {
 	prov, err := providerFor(state.SourceWago, flavor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
 	ref := state.SourceRef{Kind: state.SourceWago, Slug: key}
-	up, err := service.InstallProvider(context.Background(), prov, ref, key, "wago:"+key, flavor, force, nil)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "wago:"+key, flavor, force, prog.Handle)
 	if err != nil {
+		prog.Stop()
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
+	prog.Stop()
 	fmt.Printf("added %s %s (%s, wago)\n", key, up.Version, up.Strategy)
 	return ExitOK
 }
@@ -307,19 +326,22 @@ func addWago(key string, flavor client.Flavor, force bool) int {
 // provider. The manifest entry records the cfwidget source, so sync keeps
 // maintaining the addon through the mirror: the mirror resolves the
 // project's release files and the packages come from CurseForge's open
-// CDN — the addon page itself is never scraped and never cloned.
-func addCfwidget(key string, flavor client.Flavor, force bool) int {
+// CDN — the addon page itself is never scraped and never cloned. Progress
+// for the unit reports through prog.
+func addCfwidget(key string, flavor client.Flavor, force bool, prog progressRenderer) int {
 	prov, err := providerFor(state.SourceCfwidget, flavor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
 	ref := state.SourceRef{Kind: state.SourceCfwidget, Slug: key}
-	up, err := service.InstallProvider(context.Background(), prov, ref, key, "cfwidget:"+key, flavor, force, nil)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "cfwidget:"+key, flavor, force, prog.Handle)
 	if err != nil {
+		prog.Stop()
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
+	prog.Stop()
 	fmt.Printf("added %s %s (%s, cfwidget)\n", key, up.Version, up.Strategy)
 	return ExitOK
 }

@@ -13,11 +13,14 @@ import (
 
 // runSync implements "bfctl sync": it delegates to the shared service layer,
 // which resolves every managed addon against its upstream and installs
-// updates atomically, and reports the outcome as text or JSON. It never
-// prompts, so a launch script can call it safely: every run ends with a
-// deterministic exit code (0 clean, 1 interrupted or failed to start,
-// 2 usage, 4 partial failure). SIGINT aborts through the installer's
-// rollback and exits 1.
+// updates atomically, and reports the outcome as text or JSON. While the
+// work runs, progress reports stream to stderr through the shared renderer
+// (a live status line on a terminal, plain lines over a pipe, nothing under
+// --quiet); stdout carries only the frozen result lines and the JSON
+// document. It never prompts, so a launch script can call it safely: every
+// run ends with a deterministic exit code (0 clean, 1 interrupted or failed
+// to start, 2 usage, 4 partial failure). SIGINT aborts through the
+// installer's rollback and exits 1.
 func runSync(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("sync")
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
@@ -40,14 +43,25 @@ func runSync(args []string, _ BuildInfo) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY()})
+	defer prog.Stop()
+
 	rep, err := service.Sync(ctx, service.SyncOptions{
 		Workers:   *workers,
 		CheckOnly: *checkOnly,
 	}, func(r service.Result) {
 		if !*jsonOut {
-			printResult(r, *explain)
+			// Suspend withdraws the live status line first: the frozen
+			// result line must never be appended to it (risk R1).
+			prog.Suspend(func() { printResult(r, *explain) })
 		}
-	}, nil)
+	}, prog.Handle)
+	// The work is over — quiesce the renderer before any outcome output.
+	// On SIGINT this is the presentation polish of the interrupt path: the
+	// rollback message below prints on a clean terminal with the cursor
+	// restored, and its wording and exit code stay exactly as they are
+	// (objective O5).
+	prog.Stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl sync: %v\n", err)
 		return ExitError

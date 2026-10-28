@@ -45,7 +45,9 @@ func (b bindFlags) Set(v string) error {
 // .toc metadata, groups multi-folder families by their shared IDs and
 // proposes a binding table. Dry-run is the default: without --yes nothing is
 // written. Unknown addons become manual entries — installed by a foreign
-// tool, never touched by "bfctl sync" until re-bound with --bind.
+// tool, never touched by "bfctl sync" until re-bound with --bind. While the
+// scan runs, progress reports stream to stderr through the shared renderer
+// (deliverable D4); stdout keeps the binding table and the summary.
 func runAdopt(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("adopt")
 	pathFlag := fs.String("path", "", "addon directory to scan (default: the configured client's Interface/AddOns)")
@@ -91,12 +93,25 @@ func runAdopt(args []string, bi BuildInfo) int {
 		return ExitUsage
 	}
 
+	// One renderer per run: progress on stderr, stdout untouched. "bfctl
+	// adopt" has no graceful SIGINT path, so the guard only restores the
+	// terminal before the process dies exactly as it otherwise would.
+	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY()})
+	defer prog.Stop()
+	defer interruptGuard(prog)()
+
 	rep, err := adopt.Scan(scanDir, adopt.Options{
 		Bind:   binds,
 		St:     st,
 		Flavor: flavor,
 		Target: &toc.Target{Flavor: flavor, Interface: cs.Interface},
+		// Units are named by each group's primary addon directory and
+		// complete before the report prints below.
+		OnProgress: prog.Handle,
 	})
+	// The scan is over — quiesce the renderer before the binding table and
+	// the summary print on the quiet terminal.
+	prog.Stop()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl adopt: %v\n", err)
 		return ExitError

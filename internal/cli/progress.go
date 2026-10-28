@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -20,12 +22,21 @@ import (
 //
 // Handle is safe for concurrent workers (risk R3): each implementation
 // serializes its render loop internally, so events can never interleave on
-// screen even if the caller forwards from several goroutines. Stop is
-// idempotent and must be deferred right after construction (risk R4): it
-// restores the terminal state — cursor shown, no dangling ANSI — and drops
-// any event delivered afterwards.
+// screen even if the caller forwards from several goroutines. Suspend
+// withdraws the live status line while the command prints its own stdout
+// lines (the frozen per-addon result format), so the two never collide on
+// one terminal. Stop is idempotent and must be deferred right after
+// construction (risk R4): it restores the terminal state — cursor shown,
+// no dangling ANSI — and drops any event delivered afterwards.
+//
+// Wiring convention for the run handlers: construct one renderer per run,
+// defer Stop, hand Handle to the service layer as the progress callback,
+// route mid-run stdout prints through Suspend, and call Stop once more
+// before the final outcome text (summary, "added …", error messages) —
+// the outcome always prints on a quiet terminal.
 type progressRenderer interface {
 	Handle(ev service.ProgressEvent)
+	Suspend(fn func())
 	Stop()
 }
 
@@ -111,6 +122,10 @@ type quietProgress struct{}
 
 func (quietProgress) Handle(service.ProgressEvent) {}
 
+// Suspend runs fn untouched: quiet suppresses progress, not the command's
+// own output.
+func (quietProgress) Suspend(fn func()) { fn() }
+
 func (quietProgress) Stop() {}
 
 // plainProgress writes one incremental plain line per event — the pipe/CI
@@ -126,6 +141,10 @@ func (p *plainProgress) Handle(ev service.ProgressEvent) {
 	defer p.mu.Unlock()
 	fmt.Fprintln(p.w, progressLine(ev))
 }
+
+// Suspend runs fn untouched: plain lines are whole lines of their own, so
+// foreign output can never be appended to one.
+func (p *plainProgress) Suspend(fn func()) { fn() }
 
 func (p *plainProgress) Stop() {}
 
@@ -208,6 +227,22 @@ func (p *ttyProgress) Handle(ev service.ProgressEvent) {
 	}
 }
 
+// Suspend withdraws the live status line while fn prints the command's own
+// stdout lines (the frozen per-addon result format): the print lands on a
+// clean line instead of being appended to the rewritten status, and the
+// status returns with the next event or spinner tick. fn runs under the
+// render lock — it must not emit progress events.
+func (p *ttyProgress) Suspend(fn func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		fn()
+		return
+	}
+	p.clear()
+	fn()
+}
+
 // Stop shuts the render loop down and restores the terminal: the live line
 // is erased and the cursor shown again — no dangling ANSI state (risk R4).
 func (p *ttyProgress) Stop() {
@@ -240,5 +275,35 @@ func (p *ttyProgress) clear() {
 	if p.shown {
 		fmt.Fprint(p.w, "\r\x1b[2K")
 		p.shown = false
+	}
+}
+
+// interruptGuard restores the terminal when SIGINT aborts a run that has no
+// graceful interrupt path ("bfctl add", "bfctl adopt"): the renderer is
+// stopped — live line erased, cursor shown again — and the signal is
+// re-raised with the default disposition, so the process terminates exactly
+// as it would have without the guard: no message and no exit-code change
+// (objective O5). A run that handles SIGINT itself ("bfctl sync", the TUI)
+// must not install the guard: the re-raise would preempt its own
+// cancellation and rollback reporting. The returned function removes the
+// guard and must be deferred right after installation.
+func interruptGuard(prog progressRenderer) func() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ch:
+			prog.Stop()
+			signal.Reset(os.Interrupt)
+			if p, err := os.FindProcess(os.Getpid()); err == nil {
+				_ = p.Signal(os.Interrupt)
+			}
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		close(done)
 	}
 }

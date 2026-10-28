@@ -190,3 +190,45 @@ func TestProgressConcurrentEventsStayLineOriented(t *testing.T) {
 	}
 	assertNoControlBytes(t, buf.Bytes())
 }
+
+// TestProgressTTYSuspendWithdrawsLiveLine pins the stdout/progress
+// coordination: while the command prints its own frozen stdout lines the
+// live status line is withdrawn first, so the print is never appended to
+// the rewritten status on one terminal.
+func TestProgressTTYSuspendWithdrawsLiveLine(t *testing.T) {
+	var buf bytes.Buffer
+	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	r.Handle(progressEvent(service.PhaseInstalling, service.Detail{}))
+	r.Suspend(func() { buf.WriteString("retail/weakauras: updated 5.18.3 -> 5.18.4\n") })
+	r.Stop() // quiesce the spinner before inspecting the output
+	if out := buf.String(); !strings.Contains(out, "\r\x1b[2Kretail/weakauras: updated 5.18.3 -> 5.18.4\n") {
+		t.Errorf("foreign line not preceded by a withdrawn status line: %q", out)
+	}
+}
+
+// TestProgressSuspendRunsPrinter pins that the line-oriented and quiet
+// renderers run the printer untouched: plain progress is line-oriented,
+// and quiet suppresses progress only — never the command's own output.
+func TestProgressSuspendRunsPrinter(t *testing.T) {
+	var buf bytes.Buffer
+	r := newProgressRenderer(&buf, progressOptions{})
+	defer r.Stop()
+	r.Handle(progressEvent(service.PhaseResolving, service.Detail{}))
+	r.Suspend(func() { buf.WriteString("retail/weakauras: updated 5.18.3 -> 5.18.4\n") })
+	want := "progress: 2/5 retail/weakauras: resolving\nretail/weakauras: updated 5.18.3 -> 5.18.4\n"
+	if buf.String() != want {
+		t.Errorf("suspend output = %q, want %q", buf.String(), want)
+	}
+
+	var quiet bytes.Buffer
+	q := newProgressRenderer(&quiet, progressOptions{Quiet: true, TTY: true})
+	defer q.Stop()
+	ran := false
+	q.Suspend(func() { ran = true })
+	if !ran {
+		t.Error("quiet renderer dropped the printer")
+	}
+	if quiet.Len() != 0 {
+		t.Errorf("quiet renderer emitted %q", quiet.String())
+	}
+}
