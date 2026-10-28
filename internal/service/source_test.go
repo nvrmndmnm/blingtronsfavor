@@ -179,11 +179,19 @@ func TestInstallPlanSourceBuildProgress(t *testing.T) {
 	}
 	testState(t, &rec)
 	repo := filepath.Join(t.TempDir(), "Demo")
-	commitRepo(t, repo, map[string]string{
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{
 		"Demo.toc": "## Interface: 16001\n## Version: v1.2.3\n",
 		"core.lua": "-- body\n",
-	})
-	plan := resolver.Plan{Strategy: state.StrategySourcePkgmeta, URL: "file://" + repo, Ref: "master"}
+	} {
+		if err := os.WriteFile(filepath.Join(repo, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	branch := commitRepo(t, repo)
+	plan := resolver.Plan{Strategy: state.StrategySourcePkgmeta, URL: "file://" + filepath.ToSlash(repo), Ref: branch}
 	var got []ProgressEvent
 	if err := InstallPlan(context.Background(), nil, client.FlavorForever, rec, plan, false, func(ev ProgressEvent) { got = append(got, ev) }); err != nil {
 		t.Fatalf("InstallPlan: %v", err)
@@ -200,7 +208,7 @@ func TestInstallPlanSourceBuildProgress(t *testing.T) {
 			t.Errorf("event %d frame = %+v, want the unit 1 of 1", i, ev)
 		}
 	}
-	if got[2].Detail.Version != "master" {
-		t.Errorf("done version = %q, want the planned ref", got[2].Detail.Version)
+	if got[2].Detail.Version != branch {
+		t.Errorf("done version = %q, want the planned ref %q", got[2].Detail.Version, branch)
 	}
 }
