@@ -88,12 +88,12 @@ func captureStreams(t *testing.T, fn func()) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer outR.Close()
+	defer func() { _ = outR.Close() }()
 	errR, errW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer errR.Close()
+	defer func() { _ = errR.Close() }()
 	oldOut, oldErr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = outW, errW
 	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
@@ -336,7 +336,7 @@ func TestInterruptMidRenderLeavesTerminalClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer readyR.Close()
+	defer func() { _ = readyR.Close() }()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestInterruptMidRenderLeavesTerminalClean$")
 	cmd.Env = append(os.Environ(), "BFCTL_INTERRUPT_CHILD=1")
 	cmd.ExtraFiles = []*os.File{readyW} // child fd 3: readiness signal

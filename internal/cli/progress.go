@@ -139,7 +139,7 @@ type plainProgress struct {
 func (p *plainProgress) Handle(ev service.ProgressEvent) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	fmt.Fprintln(p.w, progressLine(ev))
+	_, _ = fmt.Fprintln(p.w, progressLine(ev))
 }
 
 // Suspend runs fn untouched: plain lines are whole lines of their own, so
@@ -219,7 +219,7 @@ func (p *ttyProgress) Handle(ev service.ProgressEvent) {
 	switch ev.Phase {
 	case service.PhaseDone, service.PhaseFailed, service.PhaseSkipped:
 		p.clear()
-		fmt.Fprintln(p.w, line)
+		_, _ = fmt.Fprintln(p.w, line)
 		p.status = ""
 	default:
 		p.status = line
@@ -254,7 +254,7 @@ func (p *ttyProgress) Stop() {
 		p.closed = true
 		p.clear()
 		if p.hidden {
-			fmt.Fprint(p.w, "\x1b[?25h")
+			_, _ = fmt.Fprint(p.w, "\x1b[?25h")
 			p.hidden = false
 		}
 	})
@@ -263,17 +263,17 @@ func (p *ttyProgress) Stop() {
 // draw rewrites the live status line in place. Callers hold p.mu.
 func (p *ttyProgress) draw() {
 	if !p.hidden {
-		fmt.Fprint(p.w, "\x1b[?25l")
+		_, _ = fmt.Fprint(p.w, "\x1b[?25l")
 		p.hidden = true
 	}
-	fmt.Fprintf(p.w, "\r\x1b[2K%s%s", p.frames[p.frame], p.status)
+	_, _ = fmt.Fprintf(p.w, "\r\x1b[2K%s%s", p.frames[p.frame], p.status)
 	p.shown = true
 }
 
 // clear erases the live line if one is on screen. Callers hold p.mu.
 func (p *ttyProgress) clear() {
 	if p.shown {
-		fmt.Fprint(p.w, "\r\x1b[2K")
+		_, _ = fmt.Fprint(p.w, "\r\x1b[2K")
 		p.shown = false
 	}
 }
