@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/github"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/state"
 )
@@ -93,5 +94,113 @@ func TestBuildSourcePlanComposesLocalRepo(t *testing.T) {
 	}
 	if strings.Contains(string(data), "@project-") {
 		t.Errorf("staged toc still carries substitution tokens:\n%s", data)
+	}
+}
+
+// TestInstallProviderProgress drives the provider add path with a
+// collector: the unit reports resolve, download, install and its terminal
+// completion in order, with the single-unit frame intact.
+func TestInstallProviderProgress(t *testing.T) {
+	testState(t, &state.AddonState{
+		ID:       "SeedAddOn",
+		Strategy: state.StrategyManual,
+		Source:   state.SourceRef{Kind: state.SourceManual, Slug: "SeedAddOn"},
+	})
+	var got []ProgressEvent
+	up, err := InstallProvider(context.Background(), &fakeProvider{},
+		state.SourceRef{Kind: state.SourceWago, Slug: "VBNBxKx5"},
+		"WagoAddOn", "wago:VBNBxKx5", client.FlavorForever, false,
+		func(ev ProgressEvent) { got = append(got, ev) })
+	if err != nil {
+		t.Fatalf("InstallProvider: %v", err)
+	}
+	if up.Version != "2.0.0" {
+		t.Errorf("upstream version = %q, want 2.0.0", up.Version)
+	}
+	want := []Phase{PhaseResolving, PhaseDownloading, PhaseInstalling, PhaseDone}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events (%+v), want %d", len(got), got, len(want))
+	}
+	for i, ev := range got {
+		if ev.Phase != want[i] {
+			t.Errorf("event %d phase = %q, want %q", i, ev.Phase, want[i])
+		}
+		if ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "WagoAddOn"}) || ev.Index != 1 || ev.Total != 1 {
+			t.Errorf("event %d frame = %+v, want the unit 1 of 1", i, ev)
+		}
+	}
+	if got[3].Detail.Version != "2.0.0" {
+		t.Errorf("done version = %q, want 2.0.0", got[3].Detail.Version)
+	}
+}
+
+// TestPlanAddOfflineProgress pins the add-flow resolve reporting: with the
+// GitHub client offline the unit reports resolving and its terminal
+// failure, and the error keeps the "cannot resolve" wording.
+func TestPlanAddOfflineProgress(t *testing.T) {
+	gh, err := github.New(github.Options{Offline: true, CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("github client: %v", err)
+	}
+	res := &resolver.Resolver{GH: gh}
+	ref, err := resolver.ParseRepo("acme/Demo")
+	if err != nil {
+		t.Fatalf("parse repo: %v", err)
+	}
+	var got []ProgressEvent
+	_, err = PlanAdd(context.Background(), res, client.FlavorForever, ref, "stable", func(ev ProgressEvent) { got = append(got, ev) })
+	if err == nil {
+		t.Fatal("PlanAdd succeeded offline")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve acme/Demo") {
+		t.Errorf("error = %q, want the cannot-resolve wording", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events (%+v), want resolving + failed", len(got), got)
+	}
+	if got[0].Phase != PhaseResolving || got[1].Phase != PhaseFailed {
+		t.Errorf("phases = %q, %q; want resolving, failed", got[0].Phase, got[1].Phase)
+	}
+	if got[0].Unit != (Unit{Flavor: client.FlavorForever, AddonID: "Demo"}) {
+		t.Errorf("unit = %+v", got[0].Unit)
+	}
+}
+
+// TestInstallPlanSourceBuildProgress drives the add-flow install of a
+// source-pkgmeta plan: the unit reports download, install and its terminal
+// completion with the planned version.
+func TestInstallPlanSourceBuildProgress(t *testing.T) {
+	requireGit(t)
+	rec := state.AddonState{
+		ID:          "Demo",
+		DisplayName: "Demo",
+		Source:      state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/Demo"},
+		Tracking:    "stable",
+	}
+	testState(t, &rec)
+	repo := filepath.Join(t.TempDir(), "Demo")
+	commitRepo(t, repo, map[string]string{
+		"Demo.toc": "## Interface: 16001\n## Version: v1.2.3\n",
+		"core.lua": "-- body\n",
+	})
+	plan := resolver.Plan{Strategy: state.StrategySourcePkgmeta, URL: "file://" + repo, Ref: "master"}
+	var got []ProgressEvent
+	if err := InstallPlan(context.Background(), nil, client.FlavorForever, rec, plan, false, func(ev ProgressEvent) { got = append(got, ev) }); err != nil {
+		t.Fatalf("InstallPlan: %v", err)
+	}
+	want := []Phase{PhaseDownloading, PhaseInstalling, PhaseDone}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events (%+v), want %d", len(got), got, len(want))
+	}
+	for i, ev := range got {
+		if ev.Phase != want[i] {
+			t.Errorf("event %d phase = %q, want %q", i, ev.Phase, want[i])
+		}
+		if ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "Demo"}) || ev.Index != 1 || ev.Total != 1 {
+			t.Errorf("event %d frame = %+v, want the unit 1 of 1", i, ev)
+		}
+	}
+	if got[2].Detail.Version != "master" {
+		t.Errorf("done version = %q, want the planned ref", got[2].Detail.Version)
 	}
 }

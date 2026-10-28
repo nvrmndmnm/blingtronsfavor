@@ -47,7 +47,7 @@ func runSync(args []string, _ BuildInfo) int {
 		if !*jsonOut {
 			printResult(r, *explain)
 		}
-	})
+	}, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl sync: %v\n", err)
 		return ExitError

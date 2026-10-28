@@ -3,6 +3,7 @@ package cli
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/provider"
+	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
@@ -199,9 +201,9 @@ func TestAddWagoInstallsAndRecords(t *testing.T) {
 	}
 	prov := &provider.Wago{Base: srv.URL, HTTP: srv.Client(), Flavor: client.FlavorMainline}
 	ref := state.SourceRef{Kind: state.SourceWago, Slug: key}
-	up, err := addViaProvider(prov, ref, key, "wago:"+key, client.FlavorMainline, false)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "wago:"+key, client.FlavorMainline, false, nil)
 	if err != nil {
-		t.Fatalf("addViaProvider: %v", err)
+		t.Fatalf("InstallProvider: %v", err)
 	}
 	if up.Version != "5.20.0" {
 		t.Errorf("upstream version = %q, want 5.20.0", up.Version)
@@ -289,9 +291,9 @@ func TestAddCfwidgetInstallsAndRecords(t *testing.T) {
 	}
 	prov := &provider.Cfwidget{Base: srv.URL, CDN: srv.URL, Flavor: client.FlavorMainline, Interface: 120100}
 	ref := state.SourceRef{Kind: state.SourceCfwidget, Slug: key}
-	up, err := addViaProvider(prov, ref, key, "cfwidget:"+key, client.FlavorMainline, false)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "cfwidget:"+key, client.FlavorMainline, false, nil)
 	if err != nil {
-		t.Fatalf("addViaProvider: %v", err)
+		t.Fatalf("InstallProvider: %v", err)
 	}
 	if up.Version != "Details.20261015.15339.172" {
 		t.Errorf("upstream version = %q, want Details.20261015.15339.172", up.Version)

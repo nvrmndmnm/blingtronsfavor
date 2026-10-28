@@ -17,6 +17,7 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/resolver"
+	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 	"github.com/itp5b5/blessforge/internal/toc"
 )
@@ -75,6 +76,14 @@ type Options struct {
 	St     *state.State      // existing state, for already-owned detection
 	Flavor client.Flavor     // client flavor the addons are adopted for
 	Target *toc.Target       // compatibility target; nil reports Unknown verdicts
+
+	// OnProgress, when non-nil, receives the resolve and completion
+	// progress events of every proposed group, in report order. Units
+	// are named by the group's primary addon directory — the binding
+	// does not exist until Persist runs — and delivery is
+	// direct and sequential, since Scan never works concurrently (see
+	// service.ProgressFunc for the contract).
+	OnProgress service.ProgressFunc
 }
 
 // folder is one scanned AddOns directory with its selected .toc.
@@ -106,8 +115,9 @@ func Scan(dir string, opts Options) (*Report, error) {
 		folders = append(folders, &folder{name: a.Dir, toc: a.Toc, verdict: a.Verdict})
 	}
 
-	for _, g := range groupFolders(folders) {
-		rep.Groups = append(rep.Groups, propose(g, table, opts))
+	families := groupFolders(folders)
+	for _, family := range families {
+		rep.Groups = append(rep.Groups, propose(family, table, opts))
 	}
 	mergeBySource(rep.Groups)
 	for _, g := range rep.Groups {
@@ -120,7 +130,33 @@ func Scan(dir string, opts Options) (*Report, error) {
 		}
 		return a.ID < b.ID
 	})
+	// Progress covers the final report units in report order: each group
+	// resolves to its upstream proposal and then completes — binds and
+	// manuals as done, already-managed families as skipped with their
+	// reason. Units are named by the group's primary addon directory.
+	for i, g := range rep.Groups {
+		unit := service.Unit{Flavor: opts.Flavor, AddonID: g.Folders[0]}
+		emitProgress(opts, service.ProgressEvent{Unit: unit, Phase: service.PhaseResolving, Index: i + 1, Total: len(rep.Groups)})
+		phase := service.PhaseDone
+		if g.Action == ActionSkip {
+			phase = service.PhaseSkipped
+		}
+		emitProgress(opts, service.ProgressEvent{
+			Unit:   unit,
+			Phase:  phase,
+			Detail: service.Detail{Version: g.Version, Reason: g.Reason},
+			Index:  i + 1,
+			Total:  len(rep.Groups),
+		})
+	}
 	return rep, nil
+}
+
+// emitProgress delivers one progress event when the caller listens.
+func emitProgress(opts Options, ev service.ProgressEvent) {
+	if opts.OnProgress != nil {
+		opts.OnProgress(ev)
+	}
 }
 
 // actionRank orders proposals: binds first, then manuals, then skips.

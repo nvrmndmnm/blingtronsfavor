@@ -82,8 +82,10 @@ func (r Report) Summary() string {
 // never prompts: it either succeeds or reports per-addon failures, so a
 // launch script can rely on the caller's exit-code mapping. onResult, when
 // non-nil, is called for each addon as soon as its outcome is decided, in
-// the deterministic task order.
-func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report, error) {
+// the deterministic task order. onProgress, when non-nil, receives a
+// ProgressEvent for every phase of every unit as the work happens (see
+// ProgressFunc for the delivery contract).
+func Sync(ctx context.Context, opts SyncOptions, onResult func(Result), onProgress ProgressFunc) (Report, error) {
 	workers := opts.Workers
 	if workers < 1 {
 		workers = 4
@@ -101,7 +103,8 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 		return Report{}, fmt.Errorf("create github client: %w", err)
 	}
 	tasks := collectTasks(st)
-	results := resolveAll(ctx, res, tasks, workers, cfg)
+	sink := newProgressSink(onProgress)
+	results := resolveAll(ctx, res, tasks, workers, cfg, sink)
 
 	rep := Report{CheckOnly: opts.CheckOnly}
 	emit := func(r Result) {
@@ -134,7 +137,8 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 				r.Kind = ResultAvailable
 				rep.Updates++
 			default:
-				if err := installUpdate(ctx, res, task, outcome); err != nil {
+				slot := progressSlot{p: sink, unit: Unit{Flavor: task.flavor, AddonID: task.addon.ID}, index: i + 1, total: len(tasks)}
+				if err := installUpdate(ctx, res, task, outcome, slot); err != nil {
 					r.Kind, r.Err = ResultFailed, err
 					if h, ok := github.RateLimitHint(err); ok && rep.RateHint == "" {
 						rep.RateHint = h
@@ -147,8 +151,23 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result)) (Report,
 			}
 		}
 		emit(r)
+		sink.emit(completionEvent(r, i+1, len(tasks)))
 	}
 	return rep, nil
+}
+
+// completionEvent maps one decided Result to its terminal progress event.
+func completionEvent(r Result, index, total int) ProgressEvent {
+	ev := ProgressEvent{Unit: Unit{Flavor: r.Flavor, AddonID: r.AddonID}, Index: index, Total: total}
+	switch r.Kind {
+	case ResultSkipped:
+		ev.Phase, ev.Detail.Reason = PhaseSkipped, r.Skip
+	case ResultFailed:
+		ev.Phase, ev.Detail.Err = PhaseFailed, r.Err
+	default:
+		ev.Phase, ev.Detail.Version = PhaseDone, r.To
+	}
+	return ev
 }
 
 // newResolver builds the GitHub-backed resolver.
@@ -166,22 +185,26 @@ func newResolver() (*resolver.Resolver, error) {
 // it atomically through the installer, recording the new version, the
 // upstream tag and the upstream changelog (the Tukui/Wago inline text
 // precedent; never a signed download link) on the addon's existing state
-// entry.
-func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult) error {
+// entry. The download and install phases are reported through slot; the
+// terminal outcome is reported by Sync's outcome loop.
+func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult, slot progressSlot) error {
 	dir, err := os.MkdirTemp("", "bfctl-sync-")
 	if err != nil {
 		return fmt.Errorf("create fetch directory: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	slot.emit(PhaseDownloading, Detail{Version: outcome.plan.Version, Ref: outcome.plan.Ref})
 	var root string
 	if outcome.prov != nil {
 		if err := outcome.prov.Fetch(ctx, task.addon.Source, dir); err != nil {
+			slot.rateLimited(PhaseDownloading, err)
 			return err
 		}
 		root = dir // provider.Fetch unpacks into dest itself
 	} else if outcome.plan.Strategy == state.StrategyRelease {
 		root, err = res.Fetch(ctx, outcome.plan, dir)
 		if err != nil {
+			slot.rateLimited(PhaseDownloading, err)
 			return err
 		}
 	} else {
@@ -207,6 +230,7 @@ func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, o
 	if err != nil {
 		return err
 	}
+	slot.emit(PhaseInstalling, Detail{Version: outcome.plan.Version, Ref: outcome.plan.Ref})
 	return in.Install(ctx, installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
 }
 
@@ -259,8 +283,11 @@ func collectTasks(st *state.State) []syncTask {
 // sources go through the release resolver; every other source kind goes
 // through its provider (Check now, Fetch at install time). The user config
 // supplies the staleness window (staleness_days) and any per-addon strategy
-// pin.
-func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, workers int, cfg *state.Config) []resolveResult {
+// pin. Each unit reports a resolving event when its worker starts and an
+// explicit rate-limit event when GitHub throttles it (risk R6); delivery
+// is serialized through sink, so the callback is never invoked
+// concurrently.
+func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, workers int, cfg *state.Config, sink *progressSink) []resolveResult {
 	results := make([]resolveResult, len(tasks))
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
@@ -281,8 +308,11 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 			go func(i int, p provider.Provider) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				slot := progressSlot{p: sink, unit: Unit{Flavor: tasks[i].flavor, AddonID: tasks[i].addon.ID}, index: i + 1, total: len(tasks)}
+				slot.emit(PhaseResolving, Detail{})
 				up, err := p.Check(ctx, tasks[i].addon.Source)
 				if err != nil {
+					slot.rateLimited(PhaseResolving, err)
 					results[i].err = fmt.Errorf("addon %s: %w", tasks[i].addon.ID, err)
 					return
 				}
@@ -308,8 +338,10 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			slot := progressSlot{p: sink, unit: Unit{Flavor: tasks[i].flavor, AddonID: tasks[i].addon.ID}, index: i + 1, total: len(tasks)}
+			slot.emit(PhaseResolving, Detail{})
 			pin, _ := cfg.PinnedStrategy(tasks[i].addon.ID, ref.Slug())
-			results[i].plan, results[i].err = res.Resolve(ctx, resolver.Request{
+			plan, err := res.Resolve(ctx, resolver.Request{
 				Owner:          ref.Owner,
 				Repo:           ref.Repo,
 				Flavor:         tasks[i].flavor,
@@ -317,6 +349,8 @@ func resolveAll(ctx context.Context, res *resolver.Resolver, tasks []syncTask, w
 				Staleness:      cfg.Staleness(),
 				PinnedStrategy: pin,
 			})
+			slot.rateLimited(PhaseResolving, err)
+			results[i].plan, results[i].err = plan, err
 		}(i)
 	}
 	wg.Wait()

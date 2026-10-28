@@ -11,8 +11,6 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/installer"
-	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/provider"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/service"
@@ -127,20 +125,9 @@ func runAdd(args []string, bi BuildInfo) int {
 	ctx := context.Background()
 
 	// Validate the repository resolves before planning anything.
-	repo, err := res.GH.Repository(ctx, ref.Owner, ref.Repo)
+	plan, err := service.PlanAdd(ctx, res, flavor, ref, tracking, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl add: cannot resolve %s: %v\n", ref.Slug(), err)
-		return ExitError
-	}
-	plan, err := res.Resolve(ctx, resolver.Request{
-		Owner:         ref.Owner,
-		Repo:          ref.Repo,
-		Flavor:        flavor,
-		Tracking:      tracking,
-		DefaultBranch: repo.DefaultBranch,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl add: cannot resolve %s: %v\n", ref.Slug(), err)
+		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
 	}
 	if *explainFlag {
@@ -154,7 +141,7 @@ func runAdd(args []string, bi BuildInfo) int {
 		Strategy:    plan.Strategy,
 		Tracking:    tracking,
 	}
-	if err := service.InstallPlan(ctx, res, flavor, rec, plan, *forceFlag); err != nil {
+	if err := service.InstallPlan(ctx, res, flavor, rec, plan, *forceFlag, nil); err != nil {
 		slog.Error("install", "addon", rec.ID, "error", err)
 		return ExitError
 	}
@@ -287,7 +274,7 @@ func addSourceGit(raw string, flavor client.Flavor, force bool) int {
 	}
 	id := gitRepoName(raw)
 	ref := state.SourceRef{Kind: state.SourceGit, URL: raw}
-	up, err := addViaProvider(prov, ref, id, raw, flavor, force)
+	up, err := service.InstallProvider(context.Background(), prov, ref, id, raw, flavor, force, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
@@ -307,7 +294,7 @@ func addWago(key string, flavor client.Flavor, force bool) int {
 		return ExitError
 	}
 	ref := state.SourceRef{Kind: state.SourceWago, Slug: key}
-	up, err := addViaProvider(prov, ref, key, "wago:"+key, flavor, force)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "wago:"+key, flavor, force, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
@@ -328,7 +315,7 @@ func addCfwidget(key string, flavor client.Flavor, force bool) int {
 		return ExitError
 	}
 	ref := state.SourceRef{Kind: state.SourceCfwidget, Slug: key}
-	up, err := addViaProvider(prov, ref, key, "cfwidget:"+key, flavor, force)
+	up, err := service.InstallProvider(context.Background(), prov, ref, key, "cfwidget:"+key, flavor, force, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
 		return ExitError
@@ -347,48 +334,6 @@ func providerFor(kind state.SourceKind, flavor client.Flavor) (provider.Provider
 	}
 	cs := st.Client(flavor)
 	return provider.For(kind, provider.Options{Flavor: flavor, Interface: cs.Interface})
-}
-
-// addViaProvider installs one addon through a provider-backed source kind
-// (wago, git-direct): Check resolves the upstream version and changelog,
-// Fetch materializes the payload into a staging directory and the atomic
-// installer commits it under the state lock. id is the manifest key and
-// name labels the source in errors (never a signed download link — the
-// providers redact those themselves). The resolved upstream is returned so
-// callers can render their own confirmation.
-func addViaProvider(prov provider.Provider, ref state.SourceRef, id, name string, flavor client.Flavor, force bool) (provider.Upstream, error) {
-	ctx := context.Background()
-	up, err := prov.Check(ctx, ref)
-	if err != nil {
-		return up, fmt.Errorf("cannot resolve %s: %w", name, err)
-	}
-	dir, err := os.MkdirTemp("", "bfctl-add-")
-	if err != nil {
-		return up, fmt.Errorf("create fetch directory: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	if err := prov.Fetch(ctx, ref, dir); err != nil {
-		return up, fmt.Errorf("cannot fetch %s: %w", name, err)
-	}
-	rec := state.AddonState{
-		ID:               id,
-		DisplayName:      id,
-		Source:           ref,
-		Strategy:         up.Strategy,
-		Tracking:         "stable",
-		InstalledVersion: up.Version,
-		ETag:             up.Version,
-		Changelog:        up.Changelog,
-	}
-	statePath, err := paths.StateFile()
-	if err != nil {
-		return up, fmt.Errorf("resolve state file: %w", err)
-	}
-	in := &installer.Installer{Store: state.Open(statePath)}
-	if err := in.Install(ctx, installer.Request{Flavor: flavor, Addon: rec, SourceDir: dir, Force: force}); err != nil {
-		return up, fmt.Errorf("install %s: %w", id, err)
-	}
-	return up, nil
 }
 
 // gitRepoName renders the repository name of a git URL as the addon id,

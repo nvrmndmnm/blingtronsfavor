@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/github"
 	"github.com/itp5b5/blessforge/internal/provider"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/state"
@@ -57,7 +60,7 @@ func TestInstallUpdateProvider(t *testing.T) {
 			Strategy:  state.StrategyDirect,
 		},
 	}
-	if err := installUpdate(context.Background(), nil, task, outcome); err != nil {
+	if err := installUpdate(context.Background(), nil, task, outcome, progressSlot{}); err != nil {
 		t.Fatalf("installUpdate: %v", err)
 	}
 
@@ -99,11 +102,220 @@ func TestResolveAllFailSoft(t *testing.T) {
 	results := resolveAll(context.Background(), nil, []syncTask{
 		{flavor: client.FlavorForever, addon: manual},
 		{flavor: client.FlavorForever, addon: orphan},
-	}, 2, &state.Config{})
+	}, 2, &state.Config{}, nil)
 	if results[0].skip == "" || results[0].err != nil {
 		t.Errorf("manual entry = %+v, want a skip", results[0])
 	}
 	if results[1].err == nil || !strings.Contains(results[1].err.Error(), "curse") {
 		t.Errorf("orphan = %+v, want a per-addon unsupported-kind error", results[1])
+	}
+}
+
+// failingProvider is a provider whose fetch fails with a canned error.
+type failingProvider struct{ err error }
+
+func (f *failingProvider) Check(context.Context, state.SourceRef) (provider.Upstream, error) {
+	return provider.Upstream{}, nil
+}
+
+func (f *failingProvider) Fetch(context.Context, state.SourceRef, string) error { return f.err }
+
+// TestInstallUpdateProgress drives the provider install path with a
+// collector: the unit reports its download and install phases in order
+// with the workload frame intact. Terminal completion is decided in Sync's
+// outcome loop and is not emitted here.
+func TestInstallUpdateProgress(t *testing.T) {
+	addon := &state.AddonState{
+		ID:               "WagoAddOn",
+		DisplayName:      "Wago Addon",
+		Source:           state.SourceRef{Kind: state.SourceWago, Slug: "VBNBxKx5"},
+		Strategy:         state.StrategyDirect,
+		Tracking:         "stable",
+		InstalledVersion: "1.9.0",
+		ETag:             "1.9.0",
+	}
+	testState(t, addon)
+	task := syncTask{flavor: client.FlavorForever, iface: 16001, addon: addon}
+	outcome := resolveResult{
+		prov:     &fakeProvider{},
+		plan:     resolver.Plan{Strategy: state.StrategyDirect, Version: "2.0.0"},
+		upstream: provider.Upstream{Version: "2.0.0", Strategy: state.StrategyDirect},
+	}
+	var got []ProgressEvent
+	slot := progressSlot{
+		p:     newProgressSink(func(ev ProgressEvent) { got = append(got, ev) }),
+		unit:  Unit{Flavor: client.FlavorForever, AddonID: "WagoAddOn"},
+		index: 2,
+		total: 3,
+	}
+	if err := installUpdate(context.Background(), nil, task, outcome, slot); err != nil {
+		t.Fatalf("installUpdate: %v", err)
+	}
+	want := []Phase{PhaseDownloading, PhaseInstalling}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events (%+v), want %d", len(got), got, len(want))
+	}
+	for i, ev := range got {
+		if ev.Phase != want[i] {
+			t.Errorf("event %d phase = %q, want %q", i, ev.Phase, want[i])
+		}
+		if ev.Unit != slot.unit || ev.Index != 2 || ev.Total != 3 {
+			t.Errorf("event %d frame = %+v, want %v 2/3", i, ev, slot.unit)
+		}
+	}
+}
+
+// TestInstallUpdateRateLimitEvent pins risk R6 in the download phase: a
+// rate-limited fetch reports an explicit "rate limited, …" event instead
+// of falling silent, before the terminal failure is decided.
+func TestInstallUpdateRateLimitEvent(t *testing.T) {
+	addon := &state.AddonState{
+		ID:       "WagoAddOn",
+		Source:   state.SourceRef{Kind: state.SourceWago, Slug: "VBNBxKx5"},
+		Strategy: state.StrategyDirect,
+		Tracking: "stable",
+	}
+	testState(t, addon)
+	task := syncTask{flavor: client.FlavorForever, iface: 16001, addon: addon}
+	outcome := resolveResult{
+		prov: &failingProvider{err: &github.RateLimitError{RetryAfter: time.Minute}},
+		plan: resolver.Plan{Strategy: state.StrategyDirect, Version: "2.0.0"},
+	}
+	var got []ProgressEvent
+	slot := progressSlot{
+		p:     newProgressSink(func(ev ProgressEvent) { got = append(got, ev) }),
+		unit:  Unit{Flavor: client.FlavorForever, AddonID: "WagoAddOn"},
+		index: 1,
+		total: 1,
+	}
+	if err := installUpdate(context.Background(), nil, task, outcome, slot); err == nil {
+		t.Fatal("installUpdate succeeded with a failing fetch")
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events (%+v), want downloading + rate-limit", len(got), got)
+	}
+	if got[0].Phase != PhaseDownloading {
+		t.Errorf("event 0 phase = %q, want downloading", got[0].Phase)
+	}
+	if got[1].Detail.Reason == "" || !strings.Contains(got[1].Detail.Reason, "rate limited") {
+		t.Errorf("event 1 reason = %q, want the rate-limit guidance", got[1].Detail.Reason)
+	}
+	if !github.IsRateLimited(got[1].Detail.Err) {
+		t.Errorf("event 1 error = %v, want the rate-limit error", got[1].Detail.Err)
+	}
+}
+
+// TestCompletionEvent pins the terminal-event mapping: skip and failure
+// carry their reason or error, and every completed install reports done
+// with the installed version.
+func TestCompletionEvent(t *testing.T) {
+	tests := []struct {
+		name  string
+		r     Result
+		phase Phase
+		check func(t *testing.T, ev ProgressEvent)
+	}{
+		{"skipped", Result{Kind: ResultSkipped, Skip: "installed by a foreign tool"}, PhaseSkipped, func(t *testing.T, ev ProgressEvent) {
+			if ev.Detail.Reason != "installed by a foreign tool" {
+				t.Errorf("reason = %q", ev.Detail.Reason)
+			}
+		}},
+		{"failed", Result{Kind: ResultFailed, Err: errors.New("boom")}, PhaseFailed, func(t *testing.T, ev ProgressEvent) {
+			if ev.Detail.Err == nil || ev.Detail.Err.Error() != "boom" {
+				t.Errorf("error = %v", ev.Detail.Err)
+			}
+		}},
+		{"updated", Result{Kind: ResultUpdated, To: "2.0.0"}, PhaseDone, func(t *testing.T, ev ProgressEvent) {
+			if ev.Detail.Version != "2.0.0" {
+				t.Errorf("version = %q", ev.Detail.Version)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.r.Flavor, tt.r.AddonID = client.FlavorForever, "Demo"
+			ev := completionEvent(tt.r, 3, 7)
+			if ev.Phase != tt.phase {
+				t.Errorf("phase = %q, want %q", ev.Phase, tt.phase)
+			}
+			if ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "Demo"}) {
+				t.Errorf("unit = %+v", ev.Unit)
+			}
+			if ev.Index != 3 || ev.Total != 7 {
+				t.Errorf("index/total = %d/%d, want 3/7", ev.Index, ev.Total)
+			}
+			tt.check(t, ev)
+		})
+	}
+}
+
+// TestResolveAllResolvingEvents pins the resolve-phase emission under
+// --workers N: every unit that actually starts resolving reports exactly
+// one resolving event with its workload slot, skipped entries report
+// nothing here (their terminal event comes from Sync's outcome loop), and
+// concurrent delivery stays race-free (run with -race).
+func TestResolveAllResolvingEvents(t *testing.T) {
+	gh, err := github.New(github.Options{Offline: true, CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("github client: %v", err)
+	}
+	res := &resolver.Resolver{GH: gh}
+	tasks := []syncTask{
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "AddOnA", Source: state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/AddOnA"}}},
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "ManualAddOn", Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"}}},
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "AddOnB", Source: state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/AddOnB"}}},
+	}
+	var got []ProgressEvent
+	sink := newProgressSink(func(ev ProgressEvent) { got = append(got, ev) })
+	resolveAll(context.Background(), res, tasks, 3, &state.Config{}, sink)
+	if len(got) != 2 {
+		t.Fatalf("got %d events (%+v), want one resolving per live unit", len(got), got)
+	}
+	wantIndex := map[string]int{"AddOnA": 1, "AddOnB": 3}
+	for _, ev := range got {
+		if ev.Phase != PhaseResolving {
+			t.Errorf("phase = %q, want resolving", ev.Phase)
+		}
+		if ev.Total != 3 {
+			t.Errorf("total = %d, want 3", ev.Total)
+		}
+		want, ok := wantIndex[ev.Unit.AddonID]
+		if !ok {
+			t.Errorf("unexpected unit %q", ev.Unit.AddonID)
+			continue
+		}
+		if ev.Index != want {
+			t.Errorf("unit %q index = %d, want %d", ev.Unit.AddonID, ev.Index, want)
+		}
+	}
+}
+
+// TestSyncSkippedProgress drives Sync end to end over a manual entry: no
+// unit ever resolves (nothing is downloaded or installed), and the outcome
+// loop reports the terminal skipped event with its reason and frame.
+func TestSyncSkippedProgress(t *testing.T) {
+	manual := &state.AddonState{
+		ID:       "ManualAddOn",
+		Strategy: state.StrategyManual,
+		Source:   state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"},
+	}
+	testState(t, manual)
+	var got []ProgressEvent
+	rep, err := Sync(context.Background(), SyncOptions{}, nil, func(ev ProgressEvent) { got = append(got, ev) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if rep.Skipped != 1 {
+		t.Fatalf("report = %+v, want one skipped unit", rep)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events (%+v), want one terminal event", len(got), got)
+	}
+	ev := got[0]
+	if ev.Phase != PhaseSkipped || ev.Detail.Reason == "" {
+		t.Errorf("event = %+v, want skipped with its reason", ev)
+	}
+	if ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "ManualAddOn"}) || ev.Index != 1 || ev.Total != 1 {
+		t.Errorf("frame = %+v, want the manual unit 1 of 1", ev)
 	}
 }
