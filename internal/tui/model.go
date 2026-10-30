@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -87,6 +88,9 @@ type Model struct {
 	confirm    bool   // delete confirmation pending
 	syncing    bool   // a service.Sync is running
 	cancelSync context.CancelFunc
+	run        *syncRun  // the running sync's live state, nil when idle
+	live       liveState // last sample of the run state (rows, counters)
+	wait       string    // rate-limit wait line while one lasts
 	statusLine string
 	results    map[string]service.Result // last sync result per addon id
 	quitting   bool
@@ -99,14 +103,7 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 		rt = &runtime{}
 	}
 	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
-	cols := []table.Column{
-		{Title: "Addon", Width: 24},
-		{Title: "Installed", Width: 12},
-		{Title: "Upstream", Width: 14},
-		{Title: "Strategy", Width: 13},
-		{Title: "Status", Width: 18},
-	}
-	tbl := table.New(table.WithColumns(cols), table.WithHeight(10), table.WithFocused(true))
+	tbl := table.New(table.WithColumns(columnsFor(0)), table.WithHeight(10), table.WithFocused(true))
 	m := Model{
 		ctx:     ctx,
 		rt:      rt,
@@ -150,18 +147,44 @@ func (m *Model) refreshRows() {
 	}
 	rows := make([]table.Row, 0, len(m.rows))
 	for _, a := range m.rows {
-		rows = append(rows, table.Row{a.Name, a.Installed, a.Upstream, service.StrategyLabel(state.Strategy(a.Strategy)), m.statusText(a)})
+		cells := table.Row{a.Name, a.Installed, a.Upstream, service.StrategyLabel(state.Strategy(a.Strategy)), m.statusText(a)}
+		if m.failed(a.ID) {
+			// A failed row stays visibly failed after the run (red).
+			for i := range cells {
+				cells[i] = failedStyle.Render(cells[i])
+			}
+		}
+		rows = append(rows, cells)
 	}
 	m.table.SetRows(rows)
 }
 
-// statusText renders the Status column: the last sync outcome for the addon
-// when one exists, otherwise its TOC verdict.
+// statusText renders the Status cell — the addon's live row while a sync
+// runs: the per-row spinner and the phase its unit is working through (in
+// the CLI live block's words), then the outcome it flips in place to,
+// then — with no sync on record — its TOC verdict.
 func (m *Model) statusText(a service.AddonRow) string {
-	r, ok := m.results[a.ID]
-	if !ok {
-		return a.Status
+	if l, ok := m.live.rows[a.ID]; ok && l.result == nil {
+		if livePhase(l.phase) {
+			s := m.spin.View() + string(l.phase)
+			if l.detail.Reason != "" {
+				s += ": " + clean(l.detail.Reason)
+			}
+			return s
+		}
+		return terminalText(l)
 	}
+	if r, ok := m.resultFor(a.ID); ok {
+		if s := outcomeText(r); s != "" {
+			return s
+		}
+	}
+	return a.Status
+}
+
+// outcomeText renders one decided outcome in the CLI live block's words:
+// "up to date", "updated 12.1.17 → 12.1.18", "failed: <reason>".
+func outcomeText(r service.Result) string {
 	switch r.Kind {
 	case service.ResultUpdated:
 		if r.From == "-" {
@@ -175,10 +198,79 @@ func (m *Model) statusText(a service.AddonRow) string {
 	case service.ResultSkipped:
 		return "manual"
 	case service.ResultFailed:
-		return "failed"
-	default:
-		return a.Status
+		s := "failed"
+		if r.Err != nil {
+			s += ": " + clean(r.Err.Error())
+		}
+		return s
 	}
+	return ""
+}
+
+// terminalText renders a terminal event in the CLI live block's words —
+// "done: 12.1.18", "failed: <error>", "skipped: <reason>" — until the
+// decided outcome lands in the row.
+func terminalText(l liveRow) string {
+	switch l.phase {
+	case service.PhaseFailed:
+		if l.detail.Err != nil {
+			return "failed: " + clean(l.detail.Err.Error())
+		}
+		return "failed"
+	case service.PhaseSkipped:
+		if l.detail.Reason != "" {
+			return "skipped: " + clean(l.detail.Reason)
+		}
+		return "skipped"
+	default:
+		if l.detail.Version != "" {
+			return "done: " + clean(l.detail.Version)
+		}
+		return "done"
+	}
+}
+
+// resultFor returns the addon's sync outcome: the running sync's decided
+// outcome first, then the last recorded one.
+func (m Model) resultFor(id string) (service.Result, bool) {
+	if l, ok := m.live.rows[id]; ok && l.result != nil {
+		return *l.result, true
+	}
+	r, ok := m.results[id]
+	return r, ok
+}
+
+// failed reports whether the addon's outcome is a failure — the row that
+// must stay visibly failed after the run.
+func (m Model) failed(id string) bool {
+	r, ok := m.resultFor(id)
+	return ok && r.Kind == service.ResultFailed
+}
+
+// runFrame renders the sync run frame the status bar shows while a sync
+// runs: how far the run has come and how it is going — "syncing 2/4 · 1
+// done · 1 failed".
+func (m Model) runFrame() string {
+	if m.live.total == 0 {
+		return "syncing…"
+	}
+	s := fmt.Sprintf("syncing %d/%d · %d done · %d failed",
+		m.live.done+m.live.failed+m.live.skipped, m.live.total, m.live.done, m.live.failed)
+	if m.live.skipped > 0 {
+		s += fmt.Sprintf(" · %d skipped", m.live.skipped)
+	}
+	return s
+}
+
+// clean strips control bytes from text carried through events and errors,
+// so a reason can never smuggle a line break or an escape into a cell.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // selected returns the addon the table cursor points at, or nil.
