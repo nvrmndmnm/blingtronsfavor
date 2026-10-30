@@ -43,9 +43,9 @@ type Detail struct {
 
 // ProgressEvent is one renderer-agnostic progress report: the phase one
 // unit of work just entered, its context and the unit's slot in the
-// workload counter (Index of Total, 1-based). Index only names a unit's
-// place in the run — it does not imply events arrive in order, because
-// under --workers N the resolve phase reports from parallel workers.
+// workload counter (Index of Total, 1-based). Index names a unit's place
+// in the run; flows process one unit at a time, so events arrive in unit
+// order.
 type ProgressEvent struct {
 	Unit   Unit
 	Phase  Phase
@@ -63,9 +63,9 @@ type ProgressEvent struct {
 // quickly; it must not call back into the running flow.
 type ProgressFunc func(ProgressEvent)
 
-// progressSink serializes progress delivery across worker goroutines
-// (risk R3): every emission takes the same lock, so the callback sees one
-// event at a time even when --workers N resolves addons in parallel.
+// progressSink serializes progress delivery across goroutines (risk R3):
+// every emission takes the same lock, so the callback sees one event at a
+// time even when a flow reports from a worker goroutine.
 type progressSink struct {
 	mu sync.Mutex
 	fn ProgressFunc

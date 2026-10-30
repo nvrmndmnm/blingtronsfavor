@@ -22,6 +22,19 @@ func progressEvent(phase service.Phase, d service.Detail) service.ProgressEvent 
 	}
 }
 
+// stepEvent is a test fixture: one event of one unit's step in a workload,
+// the unit named "flavor/addon".
+func stepEvent(index, total int, unit string, phase service.Phase, d service.Detail) service.ProgressEvent {
+	flavor, addon, _ := strings.Cut(unit, "/")
+	return service.ProgressEvent{
+		Unit:   service.Unit{Flavor: client.Flavor(flavor), AddonID: addon},
+		Phase:  phase,
+		Detail: d,
+		Index:  index,
+		Total:  total,
+	}
+}
+
 // assertNoControlBytes pins the non-TTY contract (decisions Q1/Q4/Q6):
 // progress output over a pipe is plain text — no ANSI escapes, no carriage
 // returns, no other control bytes — only "\n" line breaks.
@@ -89,40 +102,59 @@ func TestProgressPlainSanitizesDetail(t *testing.T) {
 	}
 }
 
-// TestProgressTTYLiveLine pins the terminal renderer: a running phase is
-// rendered as one rewritten status line that names the unit and phase,
-// with the cursor hidden for the live region.
+// TestProgressTTYLiveLine pins the terminal renderer's live step line: one
+// line per unit — the flow's verb, the workload slot and the unit — spun
+// by the cursor-hidden rewritten status line. Phases and versions stay in
+// the result lines and the pipe stream; the live line never carries them.
 func TestProgressTTYLiveLine(t *testing.T) {
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
 	r.Handle(progressEvent(service.PhaseDownloading, service.Detail{Version: "5.18.4"}))
 	r.Stop() // quiesce the spinner before inspecting the output
 	out := buf.String()
 	for _, want := range []string{
 		"\x1b[?25l",                     // cursor hidden while live
 		"\r\x1b[2K",                     // line rewritten in place
-		"retail/weakauras: downloading", // unit + phase named
+		"syncing: 2/5 retail/weakauras", // verb + workload slot + unit
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("live output %q missing %q", out, want)
 		}
 	}
+	if strings.Contains(out, "5.18.4") || strings.Contains(out, "downloading") {
+		t.Errorf("live step line carried the phase detail: %q", out)
+	}
 }
 
-// TestProgressTTYCommitsTerminalLines pins that finished units are
-// committed to the scrollback as whole plain lines while the live line
-// moves on: done, failed and skipped end in "\n".
-func TestProgressTTYCommitsTerminalLines(t *testing.T) {
+// TestProgressTTYSwitchesStepToDone pins the step switch: the unit's live
+// line is rewritten in place to its terminal line — "done: 2/5
+// retail/weakauras" — and committed whole; the outcome detail stays in the
+// result line underneath, never on the step line.
+func TestProgressTTYSwitchesStepToDone(t *testing.T) {
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
 	defer r.Stop()
+	r.Handle(progressEvent(service.PhaseResolving, service.Detail{}))
 	r.Handle(progressEvent(service.PhaseDone, service.Detail{Version: "5.18.4"}))
 	out := buf.String()
-	if !strings.HasSuffix(out, "progress: 2/5 retail/weakauras: done: 5.18.4\n") {
-		t.Errorf("terminal phase not committed as a line: %q", out)
+	if !strings.Contains(out, "\r\x1b[2Kdone: 2/5 retail/weakauras\n") {
+		t.Errorf("step did not switch to its terminal line in place: %q", out)
 	}
-	if strings.Contains(out, "\r") {
-		t.Errorf("terminal line rewritten in place: %q", out)
+	if strings.Contains(out, "5.18.4") {
+		t.Errorf("terminal step line carried the result detail: %q", out)
+	}
+}
+
+// TestProgressTTYTerminalLineWithoutLiveStep pins that a unit with no
+// in-flight step (a skipped entry, say) still lands its terminal line as
+// one whole line.
+func TestProgressTTYTerminalLineWithoutLiveStep(t *testing.T) {
+	var buf bytes.Buffer
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
+	defer r.Stop()
+	r.Handle(progressEvent(service.PhaseSkipped, service.Detail{Reason: "manual addon"}))
+	if out := buf.String(); !strings.Contains(out, "skipped: 2/5 retail/weakauras\n") || strings.Contains(out, "\r") {
+		t.Errorf("terminal line not committed whole: %q", out)
 	}
 }
 
@@ -132,12 +164,12 @@ func TestProgressTTYCommitsTerminalLines(t *testing.T) {
 // again, is idempotent, and drops any later event.
 func TestProgressTTYStopRestoresTerminal(t *testing.T) {
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
 	r.Handle(progressEvent(service.PhaseInstalling, service.Detail{}))
 	r.Stop()
 	r.Stop()
 	out := buf.String()
-	if !strings.HasSuffix(out, "\r\x1b[2Kprogress: 2/5 retail/weakauras: installing\n\x1b[?25h") {
+	if !strings.HasSuffix(out, "\r\x1b[2Ksyncing: 2/5 retail/weakauras\n\x1b[?25h") {
 		t.Errorf("Stop left terminal state dangling or dropped the live step: %q", out)
 	}
 	before := len(buf.Bytes())
@@ -192,53 +224,69 @@ func TestProgressConcurrentEventsStayLineOriented(t *testing.T) {
 	assertNoControlBytes(t, buf.Bytes())
 }
 
-// TestProgressTTYKeepsEveryStep pins the keep-every-step contract: on a
-// terminal every step of the way is printed and kept in the scrollback in
-// order — no step is ever swapped away by the next one — and the kept
-// trail is exactly the plain renderer's stream of lines.
-func TestProgressTTYKeepsEveryStep(t *testing.T) {
+// TestProgressTTYOneStepPerUnit pins the terminal step presentation the
+// sync UX is built on: one live step line per unit — "syncing: 1/4
+// forever/DeadlyBossMods" spinning while that unit works — that switches
+// in place to "done: 1/4 forever/DeadlyBossMods" when it finishes, before
+// the unit's result line prints underneath; only then does the next unit's
+// step line appear. No later step can ever show before an earlier one
+// finished.
+func TestProgressTTYOneStepPerUnit(t *testing.T) {
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, progressOptions{TTY: true})
-	events := []service.ProgressEvent{
-		progressEvent(service.PhaseResolving, service.Detail{}),
-		progressEvent(service.PhaseDownloading, service.Detail{Version: "5.18.4", Ref: "v5.18.4"}),
-		progressEvent(service.PhaseInstalling, service.Detail{Version: "5.18.4", Ref: "v5.18.4"}),
-		progressEvent(service.PhaseDone, service.Detail{Version: "5.18.4", Ref: "main"}),
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
+	dbm := func(phase service.Phase, d service.Detail) service.ProgressEvent {
+		return stepEvent(1, 4, "forever/DeadlyBossMods", phase, d)
 	}
-	for _, ev := range events {
-		r.Handle(ev)
+	details := func(phase service.Phase, d service.Detail) service.ProgressEvent {
+		return stepEvent(2, 4, "forever/Details-Damage-Meter", phase, d)
 	}
-	r.Stop() // the trailing step is kept too
-	want := []string{
-		"progress: 2/5 retail/weakauras: resolving",
-		"progress: 2/5 retail/weakauras: downloading: 5.18.4 (ref v5.18.4)",
-		"progress: 2/5 retail/weakauras: installing: 5.18.4 (ref v5.18.4)",
-		"progress: 2/5 retail/weakauras: done: 5.18.4 (ref main)",
-	}
+	r.Handle(dbm(service.PhaseResolving, service.Detail{}))
+	r.Handle(dbm(service.PhaseDownloading, service.Detail{Version: "12.1.18"}))
+	r.Handle(dbm(service.PhaseDone, service.Detail{Version: "12.1.18"}))
+	r.Suspend(func() { buf.WriteString("forever/DeadlyBossMods: updated 12.1.17 -> 12.1.18\n") })
+	r.Handle(details(service.PhaseResolving, service.Detail{}))
+	r.Handle(details(service.PhaseDone, service.Detail{Version: "12.1.18"}))
+	r.Suspend(func() { buf.WriteString("forever/Details-Damage-Meter: up to date (12.1.18)\n") })
+	r.Stop()
 	out := buf.String()
+	trail := []string{
+		"done: 1/4 forever/DeadlyBossMods",
+		"forever/DeadlyBossMods: updated 12.1.17 -> 12.1.18",
+		"done: 2/4 forever/Details-Damage-Meter",
+		"forever/Details-Damage-Meter: up to date (12.1.18)",
+	}
 	pos := 0
-	for _, line := range want {
+	for _, line := range trail {
 		i := strings.Index(out[pos:], line+"\n")
 		if i < 0 {
-			t.Fatalf("step %q missing or out of order in %q", line, out)
+			t.Fatalf("trail line %q missing or out of order in %q", line, out)
 		}
 		pos += i + len(line) + 1
 	}
+	if i := strings.Index(out, "syncing: 2/4 forever/Details-Damage-Meter"); i < 0 {
+		t.Errorf("second step line never spun: %q", out)
+	} else if j := strings.Index(out, "forever/DeadlyBossMods: updated 12.1.17 -> 12.1.18"); i < j {
+		t.Errorf("step 2 started before step 1's result printed: %q", out)
+	}
 }
 
-// TestProgressTTYSuspendCommitsLiveLineBeforePrint pins the
-// stdout/progress coordination: while the command prints its own frozen
-// stdout lines the live status step is committed to the scrollback first —
-// kept, not lost — so the print is never appended to the rewritten status
-// on one terminal.
-func TestProgressTTYSuspendCommitsLiveLineBeforePrint(t *testing.T) {
+// TestProgressTTYSuspendPrintsBesideLiveStep pins the stdout/progress
+// coordination: while the command prints its own stdout lines the live
+// step line is erased from the live region and redrawn below the print —
+// the print lands on a clean line, never appended to the rewritten status
+// (risk R1) — and the step keeps spinning afterwards.
+func TestProgressTTYSuspendPrintsBesideLiveStep(t *testing.T) {
 	var buf bytes.Buffer
-	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	r := newProgressRenderer(&buf, progressOptions{TTY: true, Verb: "syncing"})
 	r.Handle(progressEvent(service.PhaseInstalling, service.Detail{}))
 	r.Suspend(func() { buf.WriteString("retail/weakauras: updated 5.18.3 -> 5.18.4\n") })
 	r.Stop() // quiesce the spinner before inspecting the output
-	if out := buf.String(); !strings.Contains(out, "progress: 2/5 retail/weakauras: installing\nretail/weakauras: updated 5.18.3 -> 5.18.4\n") {
-		t.Errorf("foreign line not preceded by the committed status step: %q", out)
+	out := buf.String()
+	if !strings.Contains(out, "\r\x1b[2Kretail/weakauras: updated 5.18.3 -> 5.18.4\n") {
+		t.Errorf("foreign line not printed on a clean line: %q", out)
+	}
+	if !strings.HasSuffix(out, "\r\x1b[2Ksyncing: 2/5 retail/weakauras\n\x1b[?25h") {
+		t.Errorf("live step not redrawn after the print and kept through Stop: %q", out)
 	}
 }
 

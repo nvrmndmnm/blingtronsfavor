@@ -15,7 +15,6 @@
 .Nm
 .Cm sync
 .Op Fl -check-only
-.Op Fl -workers Ar n
 .Op Fl -explain
 .Op Fl -json
 .Nm
@@ -97,6 +96,7 @@ Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
+Addons are processed one at a time in report order.
 An update is the matching release asset when one serves the client, and a
 local source build
 .Pq .pkgmeta externals, keyword substitution, TOC flavor split
@@ -104,9 +104,6 @@ when no asset does or the releases are stale.
 Never prompts: suitable for launch scripts and cron.
 .Fl -check-only
 reports without downloading,
-.Fl -workers
-bounds concurrent resolutions
-.Pq default 4 ,
 .Fl -explain
 annotates the resolution reason of each plan,
 .Fl -json
@@ -183,13 +180,29 @@ While
 .Cm sync , Cm add
 or
 .Cm adopt
-works, ongoing activity is reported on standard error as it happens: on a
-terminal every step is printed and kept while a live status line
+works, ongoing activity is reported on standard error as it happens, one
+unit at a time in report order: on a terminal each unit owns one live step
+line
 .Pq spinner, rewritten in place
-marks the step in flight, otherwise
-.Pq pipe, CI log, file
-as one incremental plain line per event, without ANSI or other control
-bytes:
+that switches in place to its terminal step line when the unit finishes,
+just before the unit's result line prints underneath and the next unit's
+step line appears:
+.Bd -literal -offset indent
+syncing: <index>/<total> <flavor>/<addon>
+done: <index>/<total> <flavor>/<addon>
+.Ed
+.Pp
+The live line's verb names the flow
+.Pq Ar syncing , adding , adopting ;
+the terminal phase replaces it with
+.Ar done , failed
+or
+.Ar skipped ,
+and a rate-limit wait appends its reason to the live line while it lasts.
+Over a pipe
+.Pq CI log, file
+the same work streams as one incremental plain line per event, without
+ANSI or other control bytes:
 .Bd -literal -offset indent
 progress: <index>/<total> <flavor>/<addon>: <phase>[: <detail>]
 .Ed
@@ -215,7 +228,7 @@ output is safe to pipe
 or capture.
 On
 .Dv SIGINT
-the step in flight is kept as a plain line and the cursor restored before
+the step in flight is kept as its live step line and the cursor restored before
 the rollback
 message prints
 .Pq see Sx SIGNALS .
@@ -270,7 +283,7 @@ bfctl status --json | jq -r '.addons[] | [.name, .status] | @tsv'
 Launch script
 .Pq no prompts, deterministic exit codes :
 .Bd -literal -offset indent
-bfctl sync --workers 4 || case $? in 4) echo "partial failure" ;; *) exit ;; esac
+bfctl sync || case $? in 4) echo "partial failure" ;; *) exit ;; esac
 .Ed
 .Sh SEE ALSO
 .Xr dwarves 7

@@ -25,7 +25,6 @@ _bfctl() {
 	sync)
 		_arguments \
 			'--check-only[resolve and report only]' \
-			'--workers[number of concurrent resolutions]' \
 			'--explain[show why each plan was selected]' \
 			'--json[machine-readable JSON report]'
 		;;

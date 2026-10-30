@@ -13,11 +13,13 @@ import (
 
 // runSync implements "bfctl sync": it delegates to the shared service layer,
 // which resolves every managed addon against its upstream and installs
-// updates atomically, and reports the outcome as text or JSON. While the
-// work runs, progress reports stream to stderr through the shared renderer
-// (every step kept as a plain line, with a live spinner on the current one
-// over a terminal; plain lines over a pipe, nothing under --quiet); stdout
-// carries only the frozen result lines and the JSON
+// updates atomically — one addon at a time in the report order — and
+// reports the outcome as text or JSON. While the work runs, progress
+// reports stream to stderr through the shared renderer (over a terminal one
+// live step line per addon — "syncing: 1/4 flavor/addon" spinning in place
+// until it switches to "done: 1/4 flavor/addon" and the result line prints
+// underneath; plain incremental lines over a pipe, nothing under --quiet);
+// stdout carries only the frozen result lines and the JSON
 // document. It never prompts, so a launch script can call it safely: every
 // run ends with a deterministic exit code (0 clean, 1 interrupted or failed
 // to start, 2 usage, 4 partial failure). SIGINT aborts through the
@@ -25,7 +27,6 @@ import (
 func runSync(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("sync")
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
-	workers := fs.Int("workers", 4, "number of concurrent resolutions")
 	explain := fs.Bool("explain", false, "show why each plan was selected")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
 	if code, ok := parseSubcommand(fs, args); !ok {
@@ -36,24 +37,20 @@ func runSync(args []string, _ BuildInfo) int {
 		subcommandUsage(fs)
 		return ExitUsage
 	}
-	if *workers < 1 {
-		fmt.Fprintln(os.Stderr, "bfctl sync: --workers must be at least 1")
-		return ExitUsage
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY()})
+	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "syncing"})
 	defer prog.Stop()
 
 	rep, err := service.Sync(ctx, service.SyncOptions{
-		Workers:   *workers,
 		CheckOnly: *checkOnly,
 	}, func(r service.Result) {
 		if !*jsonOut {
-			// Suspend commits the live status line first: the frozen
-			// result line must never be appended to it (risk R1).
+			// The unit's terminal step line has already landed above;
+			// Suspend keeps the frozen result line off any live status
+			// region (risk R1).
 			prog.Suspend(func() { printResult(r, *explain) })
 		}
 	}, prog.Handle)

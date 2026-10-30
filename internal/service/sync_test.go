@@ -87,10 +87,10 @@ func TestInstallUpdateProvider(t *testing.T) {
 	}
 }
 
-// TestResolveAllFailSoft pins the routing contract: per-task problems are
+// TestResolveOneFailSoft pins the routing contract: per-task problems are
 // results, never run failures — manual entries skip with their reason and a
 // source kind no provider handles fails that task alone.
-func TestResolveAllFailSoft(t *testing.T) {
+func TestResolveOneFailSoft(t *testing.T) {
 	manual := &state.AddonState{
 		ID: "ManualAddOn", Strategy: state.StrategyManual,
 		Source: state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"},
@@ -99,15 +99,13 @@ func TestResolveAllFailSoft(t *testing.T) {
 		ID:     "CurseAddOn",
 		Source: state.SourceRef{Kind: state.SourceKind("curse"), Slug: "8315"},
 	}
-	results := resolveAll(context.Background(), nil, []syncTask{
-		{flavor: client.FlavorForever, addon: manual},
-		{flavor: client.FlavorForever, addon: orphan},
-	}, 2, &state.Config{}, nil)
-	if results[0].skip == "" || results[0].err != nil {
-		t.Errorf("manual entry = %+v, want a skip", results[0])
+	skip := resolveOne(context.Background(), nil, syncTask{flavor: client.FlavorForever, addon: manual}, &state.Config{}, progressSlot{})
+	if skip.skip == "" || skip.err != nil {
+		t.Errorf("manual entry = %+v, want a skip", skip)
 	}
-	if results[1].err == nil || !strings.Contains(results[1].err.Error(), "curse") {
-		t.Errorf("orphan = %+v, want a per-addon unsupported-kind error", results[1])
+	fail := resolveOne(context.Background(), nil, syncTask{flavor: client.FlavorForever, addon: orphan}, &state.Config{}, progressSlot{})
+	if fail.err == nil || !strings.Contains(fail.err.Error(), "curse") {
+		t.Errorf("orphan = %+v, want a per-addon unsupported-kind error", fail)
 	}
 }
 
@@ -249,43 +247,60 @@ func TestCompletionEvent(t *testing.T) {
 	}
 }
 
-// TestResolveAllResolvingEvents pins the resolve-phase emission under
-// --workers N: every unit that actually starts resolving reports exactly
-// one resolving event with its workload slot, skipped entries report
-// nothing here (their terminal event comes from Sync's outcome loop), and
-// concurrent delivery stays race-free (run with -race).
-func TestResolveAllResolvingEvents(t *testing.T) {
+// TestResolveOneResolvingEvent pins the per-unit resolve emission: a unit
+// that starts resolving reports exactly one resolving event with its
+// workload slot, and a skipped entry reports nothing here (its terminal
+// event comes from Sync's outcome loop).
+func TestResolveOneResolvingEvent(t *testing.T) {
 	gh, err := github.New(github.Options{Offline: true, CacheDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("github client: %v", err)
 	}
 	res := &resolver.Resolver{GH: gh}
-	tasks := []syncTask{
-		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "AddOnA", Source: state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/AddOnA"}}},
-		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "ManualAddOn", Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"}}},
-		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "AddOnB", Source: state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/AddOnB"}}},
-	}
 	var got []ProgressEvent
 	sink := newProgressSink(func(ev ProgressEvent) { got = append(got, ev) })
-	resolveAll(context.Background(), res, tasks, 3, &state.Config{}, sink)
-	if len(got) != 2 {
-		t.Fatalf("got %d events (%+v), want one resolving per live unit", len(got), got)
+	task := syncTask{flavor: client.FlavorForever, addon: &state.AddonState{ID: "AddOnA", Source: state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/AddOnA"}}}
+	slot := progressSlot{p: sink, unit: Unit{Flavor: client.FlavorForever, AddonID: "AddOnA"}, index: 3, total: 7}
+	resolveOne(context.Background(), res, task, &state.Config{}, slot)
+	if len(got) != 1 || got[0].Phase != PhaseResolving {
+		t.Fatalf("got %d events (%+v), want one resolving event", len(got), got)
 	}
-	wantIndex := map[string]int{"AddOnA": 1, "AddOnB": 3}
-	for _, ev := range got {
-		if ev.Phase != PhaseResolving {
-			t.Errorf("phase = %q, want resolving", ev.Phase)
-		}
-		if ev.Total != 3 {
-			t.Errorf("total = %d, want 3", ev.Total)
-		}
-		want, ok := wantIndex[ev.Unit.AddonID]
-		if !ok {
-			t.Errorf("unexpected unit %q", ev.Unit.AddonID)
-			continue
-		}
-		if ev.Index != want {
-			t.Errorf("unit %q index = %d, want %d", ev.Unit.AddonID, ev.Index, want)
+	if got[0].Unit != slot.unit || got[0].Index != 3 || got[0].Total != 7 {
+		t.Errorf("frame = %+v, want %v 3/7", got[0], slot.unit)
+	}
+	manual := syncTask{flavor: client.FlavorForever, addon: &state.AddonState{ID: "ManualAddOn", Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"}}}
+	got = nil
+	resolveOne(context.Background(), res, manual, &state.Config{}, progressSlot{p: sink, unit: Unit{Flavor: client.FlavorForever, AddonID: "ManualAddOn"}, index: 1, total: 1})
+	if len(got) != 0 {
+		t.Errorf("skipped entry reported %d events (%+v), want none", len(got), got)
+	}
+}
+
+// TestSyncTerminalEventBeforeResult pins the per-unit presentation order:
+// a unit's terminal progress event is delivered before its result
+// callback, so a terminal renderer finishes the step line ("done: 1/1 …")
+// just before the result line prints underneath it.
+func TestSyncTerminalEventBeforeResult(t *testing.T) {
+	manual := &state.AddonState{
+		ID:       "ManualAddOn",
+		Strategy: state.StrategyManual,
+		Source:   state.SourceRef{Kind: state.SourceManual, Slug: "ManualAddOn"},
+	}
+	testState(t, manual)
+	var order []string
+	if _, err := Sync(context.Background(), SyncOptions{},
+		func(r Result) { order = append(order, "result:"+string(r.Kind)) },
+		func(ev ProgressEvent) { order = append(order, "event:"+string(ev.Phase)) },
+	); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	want := []string{"event:skipped", "result:skipped"}
+	if len(order) != len(want) {
+		t.Fatalf("got %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("got %v, want %v", order, want)
 		}
 	}
 }

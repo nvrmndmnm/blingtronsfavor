@@ -49,7 +49,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	// One renderer per run: progress on stderr, stdout untouched. "bfctl
 	// add" has no graceful SIGINT path, so the guard only restores the
 	// terminal before the process dies exactly as it otherwise would.
-	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY()})
+	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "adding"})
 	defer prog.Stop()
 	defer interruptGuard(prog)()
 	// Wago Addons references (the addon page URL or "wago:<key>") install

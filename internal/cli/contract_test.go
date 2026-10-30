@@ -322,8 +322,8 @@ func TestSyncExitCodesFrozen(t *testing.T) {
 // renderer that is mid-render behind the real interruptGuard (the "bfctl
 // add" / "bfctl adopt" abort path; risk R4). The child is the test binary
 // itself, so the guard, the renderer and the signal disposition under test
-// are the production ones: the step in flight must be kept as a plain
-// line and the cursor restored — no dangling ANSI state — and the re-raise
+// are the production ones: the step in flight must be kept as its live
+// step line and the cursor restored — no dangling ANSI state — and the re-raise
 // must end the process
 // exactly as without the guard. "bfctl sync" ends in the same Stop()
 // cleanup before its rollback message (pinned by
@@ -397,11 +397,11 @@ func TestInterruptMidRenderLeavesTerminalClean(t *testing.T) {
 		t.Fatalf("child process state = %q, want signal: interrupt", s)
 	}
 	out := string(r.out)
-	if !strings.Contains(out, "retail/weakauras: installing") {
+	if !strings.Contains(out, "syncing: 2/5 retail/weakauras") {
 		t.Errorf("child never rendered the live status line: %q", out)
 	}
-	if !strings.HasSuffix(out, "progress: 2/5 retail/weakauras: installing: 5.18.4\n\x1b[?25h") {
-		t.Errorf("SIGINT left the terminal dirty or dropped the in-flight step: want the step kept as a plain line and the cursor restored, got %q", out)
+	if !strings.HasSuffix(out, "syncing: 2/5 retail/weakauras\n\x1b[?25h") {
+		t.Errorf("SIGINT left the terminal dirty or dropped the in-flight step: want the step kept as its live line and the cursor restored, got %q", out)
 	}
 }
 
@@ -410,7 +410,7 @@ func TestInterruptMidRenderLeavesTerminalClean(t *testing.T) {
 // the SIGINT always lands mid-render, and a readiness byte on fd 3 once the
 // guard is installed and the first live line is drawn.
 func runInterruptChild() {
-	prog := newProgressRenderer(os.Stdout, progressOptions{TTY: true})
+	prog := newProgressRenderer(os.Stdout, progressOptions{TTY: true, Verb: "syncing"})
 	defer prog.Stop()
 	defer interruptGuard(prog)()
 	ev := progressEvent(service.PhaseInstalling, service.Detail{Version: "5.18.4"})

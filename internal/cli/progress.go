@@ -22,13 +22,13 @@ import (
 //
 // Handle is safe for concurrent workers (risk R3): each implementation
 // serializes its render loop internally, so events can never interleave on
-// screen even if the caller forwards from several goroutines. Suspend
-// commits the live status line to the scrollback while the command prints
-// its own stdout lines (the frozen per-addon result format), so the two
-// never collide on one terminal. Stop is idempotent and must be deferred
-// right after construction (risk R4): it restores the terminal state —
-// cursor shown,
-// no dangling ANSI — and drops any event delivered afterwards.
+// screen even if the caller forwards from several goroutines. Suspend runs
+// the command's own stdout prints (the plan note, the frozen per-addon
+// result format) beside the live step: the step line is erased first and
+// redrawn below the print, so the two never collide on one terminal. Stop
+// is idempotent and must be deferred right after construction (risk R4):
+// it restores the terminal state — cursor shown, no dangling ANSI — and
+// drops any event delivered afterwards.
 //
 // Wiring convention for the run handlers: construct one renderer per run,
 // defer Stop, hand Handle to the service layer as the progress callback,
@@ -47,17 +47,20 @@ type progressRenderer interface {
 //   - Quiet suppresses progress entirely ("--quiet"): errors still surface
 //     in the final summary and the exit code.
 //   - TTY is the stderr stream's own terminal bit, detected independently
-//     of stdout (risk R5): a terminal gets the spinner-backed live line
-//     with every step kept in the scrollback, anything else — pipe, CI
-//     log, file — the same steps as incremental plain lines
-//     (decisions Q1/Q4/Q6).
+//     of stdout (risk R5): a terminal gets the spinner-backed live step
+//     line that switches to its terminal step when the unit finishes,
+//     anything else — pipe, CI log, file — the same steps as incremental
+//     plain lines (decisions Q1/Q4/Q6).
 //
-// Verbose and JSON need no renderer change: "--verbose" adds slog debug
-// detail beside the progress, and "--json" only constrains stdout, which
-// the renderer never touches.
+// Verb labels the live step line of the terminal renderer with the flow's
+// in-flight word — "syncing", "adding", "adopting" — so each command reads
+// naturally while it works. Verbose and JSON need no renderer change:
+// "--verbose" adds slog debug detail beside the progress, and "--json"
+// only constrains stdout, which the renderer never touches.
 type progressOptions struct {
 	Quiet bool
 	TTY   bool
+	Verb  string
 }
 
 // newProgressRenderer selects the progress renderer for one run. The
@@ -68,7 +71,7 @@ func newProgressRenderer(w io.Writer, opts progressOptions) progressRenderer {
 	case opts.Quiet:
 		return quietProgress{}
 	case opts.TTY:
-		return newTTYProgress(w)
+		return newTTYProgress(w, opts.Verb)
 	default:
 		return &plainProgress{w: w}
 	}
@@ -150,23 +153,31 @@ func (p *plainProgress) Suspend(fn func()) { fn() }
 
 func (p *plainProgress) Stop() {}
 
-// ttyProgress keeps every step of a run visible on a terminal stderr: as
-// soon as the next event (or Suspend/Stop) moves past a step, the step is
-// committed to the scrollback as a plain line — steps are never swapped
-// away by their successors. Only the trailing in-flight line is rewritten,
-// and the spinner keeps turning on it between events so long waits never
-// look like a hang (objective O1). The committed trail is exactly the
-// plain renderer's stream of lines; the spinner frames are the TUI's
+// ttyProgress keeps one live step line per unit on a terminal stderr — the
+// step presentation the sync UX is built on: the line "<verb>: 1/4
+// forever/DeadlyBossMods" spins while that one unit resolves, downloads and
+// installs, and switches in place to its terminal line ("done: 1/4
+// forever/DeadlyBossMods") the moment the unit finishes — just before the
+// unit's result line prints underneath and the next unit's step line
+// appears. A step is never swapped away by a later one and a later step can
+// never show before an earlier one finished. The spinner keeps turning on
+// the live line between events so long waits never look like a hang
+// (objective O1), and a rate-limit wait (risk R6) appends its reason to the
+// line while it lasts. Only the live line is ever rewritten; every other
+// line lands whole in the scrollback. The spinner frames are the TUI's
 // (bubbles spinner.Dot) to keep both surfaces visually alike.
 type ttyProgress struct {
 	mu     sync.Mutex
 	w      io.Writer
+	verb   string // the flow's in-flight label ("syncing", "adding", …)
 	frames []string
 	frame  int
-	status string // live status text; empty while nothing is live
-	shown  bool   // the live line is currently on screen
-	hidden bool   // the cursor is currently hidden
-	closed bool   // Stop has run; later events are dropped
+	ev     service.ProgressEvent // the unit whose step line is live
+	live   bool                  // ev names the unit now on screen
+	status string                // live status text; empty while nothing is live
+	shown  bool                  // the live line is currently on screen
+	hidden bool                  // the cursor is currently hidden
+	closed bool                  // Stop has run; later events are dropped
 
 	once    sync.Once
 	done    chan struct{}
@@ -175,9 +186,13 @@ type ttyProgress struct {
 
 // newTTYProgress starts the render loop's spinner. Nothing is written
 // until the first event, so an eventless run emits no terminal noise.
-func newTTYProgress(w io.Writer) *ttyProgress {
+func newTTYProgress(w io.Writer, verb string) *ttyProgress {
+	if verb == "" {
+		verb = "working"
+	}
 	p := &ttyProgress{
 		w:       w,
+		verb:    verb,
 		frames:  spinner.Dot.Frames,
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
@@ -211,33 +226,50 @@ func (p *ttyProgress) tick() {
 	p.draw()
 }
 
-// Handle keeps the step now behind and renders the new one: the previous
-// live line is committed to the scrollback first — it stays visible, never
-// swapped away — and the new event becomes the live line, or, for a
-// terminal phase (done/failed/skipped), the last plain line of that unit's
-// trail.
+// Handle renders one event. Live phases (resolving/downloading/installing)
+// keep the unit's step line spinning — created on the unit's first event,
+// its rate-limit reason shown while it lasts — and terminal phases
+// (done/failed/skipped) switch that same line in place to the terminal
+// line and commit it to the scrollback, before the unit's result line
+// prints underneath.
 func (p *ttyProgress) Handle(ev service.ProgressEvent) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
 		return
 	}
-	line := progressLine(ev)
-	p.commit()
 	switch ev.Phase {
 	case service.PhaseDone, service.PhaseFailed, service.PhaseSkipped:
-		_, _ = fmt.Fprintln(p.w, line)
+		if p.live && sameUnit(p.ev, ev) {
+			p.clear() // the unit's own line switches in place
+		} else {
+			p.commit() // another unit was live: its step stays visible
+		}
+		p.live = false
+		p.status = ""
+		_, _ = fmt.Fprintln(p.w, terminalStepLine(ev))
 	default:
-		p.status = line
+		status := liveStepLine(p.verb, ev)
+		if d := sanitizeProgressText(ev.Detail.Reason); d != "" {
+			status += ": " + d
+		}
+		if p.live && sameUnit(p.ev, ev) {
+			if p.status == status {
+				return
+			}
+		} else {
+			p.commit()
+		}
+		p.ev, p.live, p.status = ev, true, status
 		p.draw()
 	}
 }
 
-// Suspend commits the live status line while fn prints the command's own
-// stdout lines (the frozen per-addon result format): the print lands on a
-// clean line instead of being appended to the rewritten status, and the
-// step stays visible above it. fn runs under the render lock — it must not
-// emit progress events.
+// Suspend runs fn on a clean line while a step line is live: the live line
+// is erased first and redrawn below fn's output — the command's own stdout
+// lines are never appended to the rewritten status (risk R1) — and the
+// step keeps spinning afterwards instead of being committed early. fn runs
+// under the render lock — it must not emit progress events.
 func (p *ttyProgress) Suspend(fn func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -245,8 +277,11 @@ func (p *ttyProgress) Suspend(fn func()) {
 		fn()
 		return
 	}
-	p.commit()
+	p.clear()
 	fn()
+	if p.status != "" {
+		p.draw()
+	}
 }
 
 // Stop shuts the render loop down and restores the terminal: the trailing
@@ -296,6 +331,25 @@ func (p *ttyProgress) clear() {
 		_, _ = fmt.Fprint(p.w, "\r\x1b[2K")
 		p.shown = false
 	}
+}
+
+// liveStepLine renders a unit's in-flight step line:
+// "<verb>: <index>/<total> <flavor>/<addon>".
+func liveStepLine(verb string, ev service.ProgressEvent) string {
+	return sanitizeProgressText(fmt.Sprintf("%s: %d/%d %s/%s", verb, ev.Index, ev.Total, ev.Unit.Flavor, ev.Unit.AddonID))
+}
+
+// terminalStepLine renders a unit's finalized step line: the terminal
+// phase replaces the live line's verb in place — "done: 1/4
+// forever/DeadlyBossMods". The outcome detail stays in the result line
+// underneath, never on the step line.
+func terminalStepLine(ev service.ProgressEvent) string {
+	return sanitizeProgressText(fmt.Sprintf("%s: %d/%d %s/%s", ev.Phase, ev.Index, ev.Total, ev.Unit.Flavor, ev.Unit.AddonID))
+}
+
+// sameUnit reports whether two events report on the same unit slot.
+func sameUnit(a, b service.ProgressEvent) bool {
+	return a.Unit == b.Unit && a.Index == b.Index && a.Total == b.Total
 }
 
 // interruptGuard restores the terminal when SIGINT aborts a run that has no

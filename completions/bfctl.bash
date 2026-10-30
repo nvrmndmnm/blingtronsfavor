@@ -16,7 +16,7 @@ _bfctl() {
 		COMPREPLY=( $(compgen -W "release" -- "$cur") )
 		return 0
 		;;
-	--path|--scan|--branch|--workers|--interface)
+	--path|--scan|--branch|--interface)
 		COMPREPLY=( $(compgen -f -- "$cur") )
 		return 0
 		;;
@@ -29,7 +29,7 @@ _bfctl() {
 
 	case "${COMP_WORDS[1]}" in
 	sync)
-		COMPREPLY=( $(compgen -W "--check-only --workers --explain --json --verbose --quiet" -- "$cur") )
+		COMPREPLY=( $(compgen -W "--check-only --explain --json --verbose --quiet" -- "$cur") )
 		;;
 	status)
 		COMPREPLY=( $(compgen -W "--json --offline --scan --flavor --interface --verbose --quiet" -- "$cur") )
