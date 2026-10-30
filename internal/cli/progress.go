@@ -23,10 +23,11 @@ import (
 // Handle is safe for concurrent workers (risk R3): each implementation
 // serializes its render loop internally, so events can never interleave on
 // screen even if the caller forwards from several goroutines. Suspend
-// withdraws the live status line while the command prints its own stdout
-// lines (the frozen per-addon result format), so the two never collide on
-// one terminal. Stop is idempotent and must be deferred right after
-// construction (risk R4): it restores the terminal state — cursor shown,
+// commits the live status line to the scrollback while the command prints
+// its own stdout lines (the frozen per-addon result format), so the two
+// never collide on one terminal. Stop is idempotent and must be deferred
+// right after construction (risk R4): it restores the terminal state —
+// cursor shown,
 // no dangling ANSI — and drops any event delivered afterwards.
 //
 // Wiring convention for the run handlers: construct one renderer per run,
@@ -46,8 +47,9 @@ type progressRenderer interface {
 //   - Quiet suppresses progress entirely ("--quiet"): errors still surface
 //     in the final summary and the exit code.
 //   - TTY is the stderr stream's own terminal bit, detected independently
-//     of stdout (risk R5): a terminal gets the live status line, anything
-//     else — pipe, CI log, file — degrades to incremental plain lines
+//     of stdout (risk R5): a terminal gets the spinner-backed live line
+//     with every step kept in the scrollback, anything else — pipe, CI
+//     log, file — the same steps as incremental plain lines
 //     (decisions Q1/Q4/Q6).
 //
 // Verbose and JSON need no renderer change: "--verbose" adds slog debug
@@ -148,12 +150,14 @@ func (p *plainProgress) Suspend(fn func()) { fn() }
 
 func (p *plainProgress) Stop() {}
 
-// ttyProgress renders one live status line on a terminal stderr: the line
-// is rewritten in place and the spinner keeps turning between events, so
-// long waits never look like a hang (objective O1). The spinner frames are
-// the TUI's (bubbles spinner.Dot) to keep both surfaces visually alike.
-// Terminal phases are committed to the scrollback as plain lines, so
-// finished units stay visible while the live line moves on.
+// ttyProgress keeps every step of a run visible on a terminal stderr: as
+// soon as the next event (or Suspend/Stop) moves past a step, the step is
+// committed to the scrollback as a plain line — steps are never swapped
+// away by their successors. Only the trailing in-flight line is rewritten,
+// and the spinner keeps turning on it between events so long waits never
+// look like a hang (objective O1). The committed trail is exactly the
+// plain renderer's stream of lines; the spinner frames are the TUI's
+// (bubbles spinner.Dot) to keep both surfaces visually alike.
 type ttyProgress struct {
 	mu     sync.Mutex
 	w      io.Writer
@@ -207,8 +211,11 @@ func (p *ttyProgress) tick() {
 	p.draw()
 }
 
-// Handle rewrites the live line for a running phase and commits a plain
-// line for a terminal one (done/failed/skipped).
+// Handle keeps the step now behind and renders the new one: the previous
+// live line is committed to the scrollback first — it stays visible, never
+// swapped away — and the new event becomes the live line, or, for a
+// terminal phase (done/failed/skipped), the last plain line of that unit's
+// trail.
 func (p *ttyProgress) Handle(ev service.ProgressEvent) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -216,22 +223,21 @@ func (p *ttyProgress) Handle(ev service.ProgressEvent) {
 		return
 	}
 	line := progressLine(ev)
+	p.commit()
 	switch ev.Phase {
 	case service.PhaseDone, service.PhaseFailed, service.PhaseSkipped:
-		p.clear()
 		_, _ = fmt.Fprintln(p.w, line)
-		p.status = ""
 	default:
 		p.status = line
 		p.draw()
 	}
 }
 
-// Suspend withdraws the live status line while fn prints the command's own
+// Suspend commits the live status line while fn prints the command's own
 // stdout lines (the frozen per-addon result format): the print lands on a
 // clean line instead of being appended to the rewritten status, and the
-// status returns with the next event or spinner tick. fn runs under the
-// render lock — it must not emit progress events.
+// step stays visible above it. fn runs under the render lock — it must not
+// emit progress events.
 func (p *ttyProgress) Suspend(fn func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -239,12 +245,14 @@ func (p *ttyProgress) Suspend(fn func()) {
 		fn()
 		return
 	}
-	p.clear()
+	p.commit()
 	fn()
 }
 
-// Stop shuts the render loop down and restores the terminal: the live line
-// is erased and the cursor shown again — no dangling ANSI state (risk R4).
+// Stop shuts the render loop down and restores the terminal: the trailing
+// live line is committed to the scrollback — a step in flight when the run
+// ends, an interrupt above all, must stay visible — and the cursor is
+// shown again: no dangling ANSI state (risk R4).
 func (p *ttyProgress) Stop() {
 	p.once.Do(func() {
 		close(p.done)
@@ -252,7 +260,7 @@ func (p *ttyProgress) Stop() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.closed = true
-		p.clear()
+		p.commit()
 		if p.hidden {
 			_, _ = fmt.Fprint(p.w, "\x1b[?25h")
 			p.hidden = false
@@ -270,6 +278,18 @@ func (p *ttyProgress) draw() {
 	p.shown = true
 }
 
+// commit finalizes the live status line into the scrollback as a plain
+// line, so the step it names stays visible after the live region moves on.
+// Callers hold p.mu.
+func (p *ttyProgress) commit() {
+	if p.status == "" {
+		return
+	}
+	p.clear()
+	_, _ = fmt.Fprintln(p.w, p.status)
+	p.status = ""
+}
+
 // clear erases the live line if one is on screen. Callers hold p.mu.
 func (p *ttyProgress) clear() {
 	if p.shown {
@@ -280,10 +300,11 @@ func (p *ttyProgress) clear() {
 
 // interruptGuard restores the terminal when SIGINT aborts a run that has no
 // graceful interrupt path ("bfctl add", "bfctl adopt"): the renderer is
-// stopped — live line erased, cursor shown again — and the signal is
-// re-raised with the default disposition, so the process terminates exactly
-// as it would have without the guard: no message and no exit-code change
-// (objective O5). A run that handles SIGINT itself ("bfctl sync", the TUI)
+// stopped — the trailing step committed to the scrollback, the cursor
+// shown again — and the signal is re-raised with the default disposition,
+// so the process terminates exactly as it would have without the guard: no
+// message and no exit-code change (objective O5). A run that handles SIGINT
+// itself ("bfctl sync", the TUI)
 // must not install the guard: the re-raise would preempt its own
 // cancellation and rollback reporting. The returned function removes the
 // guard and must be deferred right after installation.

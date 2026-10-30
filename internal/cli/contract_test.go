@@ -322,8 +322,9 @@ func TestSyncExitCodesFrozen(t *testing.T) {
 // renderer that is mid-render behind the real interruptGuard (the "bfctl
 // add" / "bfctl adopt" abort path; risk R4). The child is the test binary
 // itself, so the guard, the renderer and the signal disposition under test
-// are the production ones: the live line must be erased and the cursor
-// restored — no dangling ANSI state — and the re-raise must end the process
+// are the production ones: the step in flight must be kept as a plain
+// line and the cursor restored — no dangling ANSI state — and the re-raise
+// must end the process
 // exactly as without the guard. "bfctl sync" ends in the same Stop()
 // cleanup before its rollback message (pinned by
 // TestProgressTTYStopRestoresTerminal).
@@ -399,8 +400,8 @@ func TestInterruptMidRenderLeavesTerminalClean(t *testing.T) {
 	if !strings.Contains(out, "retail/weakauras: installing") {
 		t.Errorf("child never rendered the live status line: %q", out)
 	}
-	if !strings.HasSuffix(out, "\r\x1b[2K\x1b[?25h") {
-		t.Errorf("SIGINT left the terminal dirty: want the live line erased and the cursor restored, got %q", out)
+	if !strings.HasSuffix(out, "progress: 2/5 retail/weakauras: installing: 5.18.4\n\x1b[?25h") {
+		t.Errorf("SIGINT left the terminal dirty or dropped the in-flight step: want the step kept as a plain line and the cursor restored, got %q", out)
 	}
 }
 

@@ -15,8 +15,9 @@ import (
 // which resolves every managed addon against its upstream and installs
 // updates atomically, and reports the outcome as text or JSON. While the
 // work runs, progress reports stream to stderr through the shared renderer
-// (a live status line on a terminal, plain lines over a pipe, nothing under
-// --quiet); stdout carries only the frozen result lines and the JSON
+// (every step kept as a plain line, with a live spinner on the current one
+// over a terminal; plain lines over a pipe, nothing under --quiet); stdout
+// carries only the frozen result lines and the JSON
 // document. It never prompts, so a launch script can call it safely: every
 // run ends with a deterministic exit code (0 clean, 1 interrupted or failed
 // to start, 2 usage, 4 partial failure). SIGINT aborts through the
@@ -51,7 +52,7 @@ func runSync(args []string, _ BuildInfo) int {
 		CheckOnly: *checkOnly,
 	}, func(r service.Result) {
 		if !*jsonOut {
-			// Suspend withdraws the live status line first: the frozen
+			// Suspend commits the live status line first: the frozen
 			// result line must never be appended to it (risk R1).
 			prog.Suspend(func() { printResult(r, *explain) })
 		}

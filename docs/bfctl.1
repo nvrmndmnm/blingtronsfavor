@@ -184,9 +184,9 @@ While
 or
 .Cm adopt
 works, ongoing activity is reported on standard error as it happens: on a
-terminal as one live status line
-.Pq spinner, rewritten in place ,
-otherwise
+terminal every step is printed and kept while a live status line
+.Pq spinner, rewritten in place
+marks the step in flight, otherwise
 .Pq pipe, CI log, file
 as one incremental plain line per event, without ANSI or other control
 bytes:
@@ -215,7 +215,8 @@ output is safe to pipe
 or capture.
 On
 .Dv SIGINT
-the live line is erased and the cursor restored before the rollback
+the step in flight is kept as a plain line and the cursor restored before
+the rollback
 message prints
 .Pq see Sx SIGNALS .
 .Sh SIGNALS

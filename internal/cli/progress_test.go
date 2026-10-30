@@ -127,8 +127,9 @@ func TestProgressTTYCommitsTerminalLines(t *testing.T) {
 }
 
 // TestProgressTTYStopRestoresTerminal pins the cleanup contract (risk
-// R4): Stop clears the live line and shows the cursor again, is
-// idempotent, and drops any later event.
+// R4): Stop commits the trailing live step to the scrollback — the step in
+// flight is kept, never lost with the live region — shows the cursor
+// again, is idempotent, and drops any later event.
 func TestProgressTTYStopRestoresTerminal(t *testing.T) {
 	var buf bytes.Buffer
 	r := newProgressRenderer(&buf, progressOptions{TTY: true})
@@ -136,8 +137,8 @@ func TestProgressTTYStopRestoresTerminal(t *testing.T) {
 	r.Stop()
 	r.Stop()
 	out := buf.String()
-	if !strings.HasSuffix(out, "\r\x1b[2K\x1b[?25h") {
-		t.Errorf("Stop left terminal state dangling: %q", out)
+	if !strings.HasSuffix(out, "\r\x1b[2Kprogress: 2/5 retail/weakauras: installing\n\x1b[?25h") {
+		t.Errorf("Stop left terminal state dangling or dropped the live step: %q", out)
 	}
 	before := len(buf.Bytes())
 	r.Handle(progressEvent(service.PhaseDone, service.Detail{}))
@@ -191,18 +192,53 @@ func TestProgressConcurrentEventsStayLineOriented(t *testing.T) {
 	assertNoControlBytes(t, buf.Bytes())
 }
 
-// TestProgressTTYSuspendWithdrawsLiveLine pins the stdout/progress
-// coordination: while the command prints its own frozen stdout lines the
-// live status line is withdrawn first, so the print is never appended to
-// the rewritten status on one terminal.
-func TestProgressTTYSuspendWithdrawsLiveLine(t *testing.T) {
+// TestProgressTTYKeepsEveryStep pins the keep-every-step contract: on a
+// terminal every step of the way is printed and kept in the scrollback in
+// order — no step is ever swapped away by the next one — and the kept
+// trail is exactly the plain renderer's stream of lines.
+func TestProgressTTYKeepsEveryStep(t *testing.T) {
+	var buf bytes.Buffer
+	r := newProgressRenderer(&buf, progressOptions{TTY: true})
+	events := []service.ProgressEvent{
+		progressEvent(service.PhaseResolving, service.Detail{}),
+		progressEvent(service.PhaseDownloading, service.Detail{Version: "5.18.4", Ref: "v5.18.4"}),
+		progressEvent(service.PhaseInstalling, service.Detail{Version: "5.18.4", Ref: "v5.18.4"}),
+		progressEvent(service.PhaseDone, service.Detail{Version: "5.18.4", Ref: "main"}),
+	}
+	for _, ev := range events {
+		r.Handle(ev)
+	}
+	r.Stop() // the trailing step is kept too
+	want := []string{
+		"progress: 2/5 retail/weakauras: resolving",
+		"progress: 2/5 retail/weakauras: downloading: 5.18.4 (ref v5.18.4)",
+		"progress: 2/5 retail/weakauras: installing: 5.18.4 (ref v5.18.4)",
+		"progress: 2/5 retail/weakauras: done: 5.18.4 (ref main)",
+	}
+	out := buf.String()
+	pos := 0
+	for _, line := range want {
+		i := strings.Index(out[pos:], line+"\n")
+		if i < 0 {
+			t.Fatalf("step %q missing or out of order in %q", line, out)
+		}
+		pos += i + len(line) + 1
+	}
+}
+
+// TestProgressTTYSuspendCommitsLiveLineBeforePrint pins the
+// stdout/progress coordination: while the command prints its own frozen
+// stdout lines the live status step is committed to the scrollback first —
+// kept, not lost — so the print is never appended to the rewritten status
+// on one terminal.
+func TestProgressTTYSuspendCommitsLiveLineBeforePrint(t *testing.T) {
 	var buf bytes.Buffer
 	r := newProgressRenderer(&buf, progressOptions{TTY: true})
 	r.Handle(progressEvent(service.PhaseInstalling, service.Detail{}))
 	r.Suspend(func() { buf.WriteString("retail/weakauras: updated 5.18.3 -> 5.18.4\n") })
 	r.Stop() // quiesce the spinner before inspecting the output
-	if out := buf.String(); !strings.Contains(out, "\r\x1b[2Kretail/weakauras: updated 5.18.3 -> 5.18.4\n") {
-		t.Errorf("foreign line not preceded by a withdrawn status line: %q", out)
+	if out := buf.String(); !strings.Contains(out, "progress: 2/5 retail/weakauras: installing\nretail/weakauras: updated 5.18.3 -> 5.18.4\n") {
+		t.Errorf("foreign line not preceded by the committed status step: %q", out)
 	}
 }
 
