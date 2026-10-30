@@ -13,7 +13,7 @@ import (
 // testState points bfctl's config and cache at fresh temp directories and
 // records one forever client (Forever 1.60.1, interface 16001) with the
 // given addons.
-func testState(t *testing, addons ...*state.AddonState) {
+func testState(t *testing.T, addons ...*state.AddonState) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
