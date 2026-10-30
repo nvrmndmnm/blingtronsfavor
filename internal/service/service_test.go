@@ -12,8 +12,8 @@ import (
 
 // testState points bfctl's config and cache at fresh temp directories and
 // records one forever client (Forever 1.60.1, interface 16001) with the
-// given addon.
-func testState(t *testing.T, a *state.AddonState) {
+// given addons.
+func testState(t *testing, addons ...*state.AddonState) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -24,12 +24,16 @@ func testState(t *testing.T, a *state.AddonState) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	byID := make(map[string]*state.AddonState, len(addons))
+	for _, a := range addons {
+		byID[a.ID] = a
+	}
 	st := state.New()
 	st.Clients[client.FlavorForever] = &state.ClientState{
 		Flavor:    client.FlavorForever,
 		Root:      filepath.Join(t.TempDir(), "_forever_"),
 		Interface: 16001,
-		Addons:    map[string]*state.AddonState{a.ID: a},
+		Addons:    byID,
 	}
 	if err := state.Open(path).Save(st); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 	"github.com/itp5b5/blessforge/internal/toc"
 )
@@ -428,5 +429,71 @@ func TestCfwidgetBinding(t *testing.T) {
 	}
 	if pinned.Reason != "--bind cfwidget:2382" {
 		t.Errorf("Pinned reason = %q, want --bind cfwidget:2382", pinned.Reason)
+	}
+}
+
+// TestScanProgressEvents pins the adopt-flow reporting: every proposed
+// group reports its resolve and completion phases in report order — binds
+// and manuals end in done, already-managed families end in skipped with
+// their reason — and every event carries the flavor and the workload frame.
+func TestScanProgressEvents(t *testing.T) {
+	dir := writeTree(t, filepath.Join(t.TempDir(), "AddOns"), map[string]string{
+		"BindAdd/BindAdd.toc":       "## Interface: 16001\n## X-Repository: https://github.com/acme/BindAdd\n",
+		"ManualAdd/ManualAdd.toc":   "## Interface: 16001\n",
+		"ManagedAdd/ManagedAdd.toc": "## Interface: 16001\n## X-Repository: https://github.com/acme/ManagedAdd\n",
+	})
+	st := state.New()
+	st.Clients[client.FlavorForever] = &state.ClientState{
+		Flavor:    client.FlavorForever,
+		Interface: 16001,
+		Addons: map[string]*state.AddonState{
+			"ManagedAdd": {
+				ID:        "ManagedAdd",
+				Source:    state.SourceRef{Kind: state.SourceGitHub, Slug: "acme/ManagedAdd"},
+				OwnedDirs: []string{"ManagedAdd"},
+			},
+		},
+	}
+	var got []service.ProgressEvent
+	rep, err := Scan(dir, Options{
+		Known:      []KnownAddon{},
+		St:         st,
+		Flavor:     client.FlavorForever,
+		Target:     fixtureTarget,
+		OnProgress: func(ev service.ProgressEvent) { got = append(got, ev) },
+	})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(rep.Groups) != 3 {
+		t.Fatalf("groups = %d, want 3", len(rep.Groups))
+	}
+	want := []struct {
+		unit   string
+		phases [2]service.Phase
+	}{
+		{"BindAdd", [2]service.Phase{service.PhaseResolving, service.PhaseDone}},
+		{"ManualAdd", [2]service.Phase{service.PhaseResolving, service.PhaseDone}},
+		{"ManagedAdd", [2]service.Phase{service.PhaseResolving, service.PhaseSkipped}},
+	}
+	if len(got) != 2*len(want) {
+		t.Fatalf("got %d events (%+v), want 2 per group", len(got), got)
+	}
+	for i, w := range want {
+		for j, phase := range w.phases {
+			ev := got[2*i+j]
+			if ev.Unit != (service.Unit{Flavor: client.FlavorForever, AddonID: w.unit}) {
+				t.Errorf("event %d unit = %+v, want %s", 2*i+j, ev.Unit, w.unit)
+			}
+			if ev.Phase != phase {
+				t.Errorf("unit %s phase = %q, want %q", w.unit, ev.Phase, phase)
+			}
+			if ev.Index != i+1 || ev.Total != len(want) {
+				t.Errorf("unit %s frame = %d/%d, want %d/%d", w.unit, ev.Index, ev.Total, i+1, len(want))
+			}
+		}
+	}
+	if skipped := got[len(got)-1]; skipped.Detail.Reason == "" {
+		t.Errorf("skip event = %+v, want its reason carried", skipped)
 	}
 }

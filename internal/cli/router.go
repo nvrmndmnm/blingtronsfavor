@@ -105,7 +105,19 @@ func Run(args []string, bi BuildInfo) int {
 // stdoutIsTTY reports whether standard output is a terminal, which is how a
 // bare "bfctl" decides between the TUI and the usage text.
 func stdoutIsTTY() bool {
-	fi, err := os.Stdout.Stat()
+	return streamIsTTY(os.Stdout)
+}
+
+// stderrIsTTY reports whether standard error is a terminal. The two
+// streams are detected independently (risk R5): "bfctl sync >log" leaves
+// stderr a terminal (live progress), while "bfctl sync 2>log" degrades the
+// progress renderer to plain lines even though stdout is interactive.
+func stderrIsTTY() bool {
+	return streamIsTTY(os.Stderr)
+}
+
+func streamIsTTY(f *os.File) bool {
+	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 

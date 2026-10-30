@@ -203,7 +203,7 @@ func (m Model) startSync() (tea.Model, tea.Cmd) {
 		defer cancel()
 		report, err := service.Sync(ctx, service.SyncOptions{}, func(r service.Result) {
 			m.rt.send(syncResultMsg{result: r})
-		})
+		}, nil)
 		m.rt.send(syncDoneMsg{report: report, err: err})
 	}()
 	var spinCmd tea.Cmd

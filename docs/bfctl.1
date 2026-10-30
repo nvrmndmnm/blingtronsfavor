@@ -1,4 +1,4 @@
-.Dd October 26, 2025
+.Dd October 28, 2026
 .Dt BFCTL 1
 .Os
 .Sh NAME
@@ -15,7 +15,6 @@
 .Nm
 .Cm sync
 .Op Fl -check-only
-.Op Fl -workers Ar n
 .Op Fl -explain
 .Op Fl -json
 .Nm
@@ -97,6 +96,8 @@ Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
+Addons are worked concurrently and their results are reported in report
+order.
 An update is the matching release asset when one serves the client, and a
 local source build
 .Pq .pkgmeta externals, keyword substitution, TOC flavor split
@@ -104,9 +105,6 @@ when no asset does or the releases are stale.
 Never prompts: suitable for launch scripts and cron.
 .Fl -check-only
 reports without downloading,
-.Fl -workers
-bounds concurrent resolutions
-.Pq default 4 ,
 .Fl -explain
 annotates the resolution reason of each plan,
 .Fl -json
@@ -178,6 +176,66 @@ and an aggregate
 .Va summary .
 Both are stable interfaces intended for
 .Xr jq 1 .
+.Sh PROGRESS OUTPUT
+While
+.Cm sync , Cm add
+or
+.Cm adopt
+works, ongoing activity is reported on standard error as it happens.
+.Cm sync
+works on several addons at once, and on a terminal every addon owns one
+row of a live block
+.Pq spinner, rewritten in place
+that is visible from the start and tracks its own addon through the
+phases, flipping in place to its terminal line when the addon finishes:
+.Bd -literal -offset indent
+syncing: <index>/<total> <flavor>/<addon>: <phase>
+done: <index>/<total> <flavor>/<addon>: <version>
+.Ed
+.Pp
+The row's verb names the flow
+.Pq Ar syncing , adding , adopting ;
+the terminal phase replaces it with
+.Ar done , failed
+or
+.Ar skipped ,
+and the addon's result line then replaces that row outright, so every
+addon's whole story stays in one place.
+A rate-limit wait appends its reason to the row while it lasts.
+Over a pipe
+.Pq CI log, file
+the same work streams as one incremental plain line per event, without
+ANSI or other control bytes:
+.Bd -literal -offset indent
+progress: <index>/<total> <flavor>/<addon>: <phase>[: <detail>]
+.Ed
+.Pp
+.Ar phase
+is one of
+.Ar resolving , downloading , installing , done , failed , skipped ;
+.Ar detail
+names the version or ref in flight, the failure or skip reason, or a
+rate-limit wait.
+.Fl q , -quiet
+suppresses progress entirely.
+.Pp
+Stream discipline: results and the
+.Fl -json
+report stay alone on standard output; progress and logs use standard
+error.
+The per-addon result lines and the summary keep their historical format,
+and the result lines always stream in report order even though the work
+runs in parallel, so
+.Nm
+output is safe to pipe
+.Pq e.g. into jq
+or capture.
+On
+.Dv SIGINT
+the rows in flight are kept as they are and the cursor restored before
+the rollback
+message prints
+.Pq see Sx SIGNALS .
 .Sh SIGNALS
 .Bl -tag -width SIGINT
 .It Dv SIGINT
@@ -229,7 +287,7 @@ bfctl status --json | jq -r '.addons[] | [.name, .status] | @tsv'
 Launch script
 .Pq no prompts, deterministic exit codes :
 .Bd -literal -offset indent
-bfctl sync --workers 4 || case $? in 4) echo "partial failure" ;; *) exit ;; esac
+bfctl sync || case $? in 4) echo "partial failure" ;; *) exit ;; esac
 .Ed
 .Sh SEE ALSO
 .Xr dwarves 7
