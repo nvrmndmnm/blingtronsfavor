@@ -140,10 +140,11 @@ func runAdd(args []string, bi BuildInfo) int {
 		return ExitError
 	}
 	if *explainFlag {
-		// The status line is still live (a successful plan keeps reporting
-		// through InstallPlan), so the plan note goes through Suspend like
-		// every mid-run stdout line.
-		prog.Suspend(func() { fmt.Printf("plan: %s\n", plan.Reason) })
+		// The unit's row is still live (a successful plan keeps reporting
+		// through InstallPlan), so the plan note goes through Print like
+		// every mid-run stdout line: it lands just above the row and the
+		// row keeps spinning below it.
+		prog.Print(service.Unit{Flavor: flavor, AddonID: ref.Repo}, fmt.Sprintf("plan: %s\n", plan.Reason))
 	}
 
 	rec := state.AddonState{

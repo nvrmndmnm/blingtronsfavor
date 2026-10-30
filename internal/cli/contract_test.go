@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -232,7 +233,9 @@ func TestSyncJSONStdoutIsOneCleanJSONDocument(t *testing.T) {
 // (decisions Q1/Q4/Q6): with both streams redirected the command emits no
 // ANSI or control bytes at all, every stderr line is one parseable progress
 // line in the canonical shape, and the frozen result lines land on stdout
-// only.
+// only. Units report their terminal events in completion order (the work
+// runs concurrently), so the progress lines are pinned as a set; the
+// result lines stay strictly in report order.
 func TestSyncRedirectedOutputStaysPlainAndParseable(t *testing.T) {
 	testSyncState(t, brokenAddon(), manualAddon())
 	stdout, stderr, code := runSyncCaptured(t)
@@ -247,10 +250,15 @@ func TestSyncRedirectedOutputStaysPlainAndParseable(t *testing.T) {
 	if stdout != wantStdout {
 		t.Errorf("stdout = %q, want %q", stdout, wantStdout)
 	}
-	wantStderr := "progress: 1/2 forever/BrokenAddOn: failed: addon BrokenAddOn: parse repository \"not a repo\": want owner/repo or a github.com URL\n" +
-		"progress: 2/2 forever/ManualAddOn: skipped: installed by a foreign tool (re-bind with \"bfctl adopt --bind\" to manage it)\n"
-	if stderr != wantStderr {
-		t.Errorf("stderr = %q, want %q", stderr, wantStderr)
+	wantStderr := []string{
+		"progress: 1/2 forever/BrokenAddOn: failed: addon BrokenAddOn: parse repository \"not a repo\": want owner/repo or a github.com URL",
+		"progress: 2/2 forever/ManualAddOn: skipped: installed by a foreign tool (re-bind with \"bfctl adopt --bind\" to manage it)",
+	}
+	gotStderr := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	slices.Sort(gotStderr)
+	slices.Sort(wantStderr)
+	if !slices.Equal(gotStderr, wantStderr) {
+		t.Errorf("stderr = %q, want %q", gotStderr, wantStderr)
 	}
 	lineRE := regexp.MustCompile(`^progress: \d+/\d+ \S+/\S+: \S+`)
 	for _, line := range strings.Split(strings.TrimSuffix(stderr, "\n"), "\n") {
@@ -322,8 +330,8 @@ func TestSyncExitCodesFrozen(t *testing.T) {
 // renderer that is mid-render behind the real interruptGuard (the "bfctl
 // add" / "bfctl adopt" abort path; risk R4). The child is the test binary
 // itself, so the guard, the renderer and the signal disposition under test
-// are the production ones: the step in flight must be kept as its live
-// step line and the cursor restored — no dangling ANSI state — and the re-raise
+// are the production ones: the row in flight must be kept as its live
+// row and the cursor restored — no dangling ANSI state — and the re-raise
 // must end the process
 // exactly as without the guard. "bfctl sync" ends in the same Stop()
 // cleanup before its rollback message (pinned by
@@ -397,11 +405,11 @@ func TestInterruptMidRenderLeavesTerminalClean(t *testing.T) {
 		t.Fatalf("child process state = %q, want signal: interrupt", s)
 	}
 	out := string(r.out)
-	if !strings.Contains(out, "syncing: 2/5 retail/weakauras") {
-		t.Errorf("child never rendered the live status line: %q", out)
+	if !strings.Contains(out, "syncing: 2/5 retail/weakauras: installing") {
+		t.Errorf("child never rendered the live row: %q", out)
 	}
-	if !strings.HasSuffix(out, "syncing: 2/5 retail/weakauras\n\x1b[?25h") {
-		t.Errorf("SIGINT left the terminal dirty or dropped the in-flight step: want the step kept as its live line and the cursor restored, got %q", out)
+	if !strings.HasSuffix(out, "syncing: 2/5 retail/weakauras: installing\n\x1b[?25h") {
+		t.Errorf("SIGINT left the terminal dirty or dropped the row in flight: want the row kept as its live row and the cursor restored, got %q", out)
 	}
 }
 

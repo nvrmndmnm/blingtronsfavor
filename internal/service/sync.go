@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/itp5b5/blessforge/internal/client"
@@ -20,6 +21,12 @@ type SyncOptions struct {
 	// CheckOnly resolves and reports only: no downloads, no installs.
 	CheckOnly bool
 }
+
+// defaultSyncWorkers is how many addons a Sync run works on at once. The
+// units run fully in parallel — resolve, download and install — so a slow
+// addon never stalls the others; only the local state machinery inside the
+// install step is serialized (see installUpdate).
+const defaultSyncWorkers = 4
 
 // ResultKind classifies one per-addon sync outcome.
 type ResultKind string
@@ -75,14 +82,18 @@ func (r Report) Summary() string {
 // Sync resolves every managed addon against its upstream and — unless
 // CheckOnly is set — installs the available updates atomically. It never
 // prompts: it either succeeds or reports per-addon failures, so a launch
-// script can rely on the caller's exit-code mapping. Units are processed
-// strictly one at a time in the deterministic task order — one addon
-// resolves, downloads and installs to completion before the next starts —
-// so progress reports stream one finished step at a time. onResult, when
-// non-nil, is called for each addon as soon as its outcome is decided.
-// onProgress, when non-nil, receives a ProgressEvent for every phase of
-// every unit as the work happens (see ProgressFunc for the delivery
-// contract).
+// script can rely on the caller's exit-code mapping. Units of work run
+// concurrently (defaultSyncWorkers at a time) in the deterministic task
+// order: each addon resolves, downloads and installs on its own goroutine,
+// so every addon reports its phases live while the others work. Outcomes
+// are decided whenever each addon finishes but reported in the task order:
+// onResult, when non-nil, is called in report order as soon as each
+// outcome is decided and its predecessors are reported, and rep.Results
+// keeps that order too — so the frozen per-addon result lines always
+// stream in report order even though the work is parallel. onProgress,
+// when non-nil, receives a ProgressEvent for every phase of every unit as
+// the work happens; the unit's terminal event lands right before its
+// result callback (see ProgressFunc for the delivery contract).
 func Sync(ctx context.Context, opts SyncOptions, onResult func(Result), onProgress ProgressFunc) (Report, error) {
 	st, err := LoadState()
 	if err != nil {
@@ -99,60 +110,96 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result), onProgre
 	tasks := collectTasks(st)
 	sink := newProgressSink(onProgress)
 
+	// The worker pool runs whole units concurrently; ready[i] is closed
+	// once unit i's outcome is decided and its terminal event delivered.
+	// installMu serializes the local state machinery inside installUpdate.
+	results := make([]Result, len(tasks))
+	ready := make([]chan struct{}, len(tasks))
+	for i := range ready {
+		ready[i] = make(chan struct{})
+	}
+	workers := min(defaultSyncWorkers, max(len(tasks), 1))
+	jobs := make(chan int, len(tasks))
+	var wg sync.WaitGroup
+	var installMu sync.Mutex
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				results[i] = syncUnit(ctx, res, tasks[i], cfg, opts, sink, i, len(tasks), &installMu)
+				sink.emit(completionEvent(results[i], i+1, len(tasks)))
+				close(ready[i])
+			}
+		}()
+	}
+	for i := range tasks {
+		jobs <- i
+	}
+	close(jobs)
+
+	// Report in the deterministic task order: an outcome is published the
+	// moment it and every predecessor are ready, so the frozen result
+	// lines and rep.Results stay ordered while the work stays parallel.
 	rep := Report{CheckOnly: opts.CheckOnly}
-	emit := func(r Result) {
+	for i := range tasks {
+		<-ready[i]
+		r := results[i]
 		rep.Results = append(rep.Results, r)
+		switch r.Kind {
+		case ResultSkipped:
+			rep.Skipped++
+		case ResultFailed:
+			rep.Failed++
+			if h, ok := github.RateLimitHint(r.Err); ok && rep.RateHint == "" {
+				rep.RateHint = h
+			}
+		case ResultAvailable:
+			rep.Updates++
+		case ResultUpdated:
+			rep.Updated++
+		default:
+			rep.UpToDate++
+		}
 		if onResult != nil {
 			onResult(r)
 		}
 	}
-	for i, task := range tasks {
-		// One unit of work at a time, in the deterministic task order:
-		// the unit resolves, downloads and installs to completion — its
-		// progress events streaming as it goes — before the next starts.
-		slot := progressSlot{p: sink, unit: Unit{Flavor: task.flavor, AddonID: task.addon.ID}, index: i + 1, total: len(tasks)}
-		outcome := resolveOne(ctx, res, task, cfg, slot)
-		r := Result{Flavor: task.flavor, AddonID: task.addon.ID, From: versionOr(task.addon.InstalledVersion, task.addon.InstalledCommit)}
+	wg.Wait()
+	return rep, nil
+}
+
+// syncUnit runs one addon's whole unit of work — resolve, decide, install
+// — and returns its outcome. Failures are results rather than fatal
+// errors: sync reports them and keeps going. The unit's progress events
+// stream through sink as the phases happen (the terminal event is emitted
+// by the pool, right after the outcome is stored).
+func syncUnit(ctx context.Context, res *resolver.Resolver, task syncTask, cfg *state.Config, opts SyncOptions, sink *progressSink, i, total int, installMu *sync.Mutex) Result {
+	slot := progressSlot{p: sink, unit: Unit{Flavor: task.flavor, AddonID: task.addon.ID}, index: i + 1, total: total}
+	outcome := resolveOne(ctx, res, task, cfg, slot)
+	r := Result{Flavor: task.flavor, AddonID: task.addon.ID, From: versionOr(task.addon.InstalledVersion, task.addon.InstalledCommit)}
+	switch {
+	case outcome.skip != "":
+		r.Kind, r.Skip = ResultSkipped, outcome.skip
+	case outcome.err != nil:
+		r.Kind, r.Err = ResultFailed, outcome.err
+	default:
+		plan := outcome.plan
+		r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
 		switch {
-		case outcome.skip != "":
-			r.Kind, r.Skip = ResultSkipped, outcome.skip
-			rep.Skipped++
-		case outcome.err != nil:
-			r.Kind, r.Err = ResultFailed, outcome.err
-			if h, ok := github.RateLimitHint(outcome.err); ok && rep.RateHint == "" {
-				rep.RateHint = h
-			}
-			rep.Failed++
+		case plan.Version != "" && (plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag):
+			r.Kind = ResultUpToDate
+		case opts.CheckOnly:
+			r.Kind = ResultAvailable
 		default:
-			plan := outcome.plan
-			r.Plan, r.To = plan, versionOr(plan.Version, plan.Ref)
-			switch {
-			case plan.Version != "" && (plan.Version == task.addon.InstalledVersion || plan.Version == task.addon.ETag):
-				r.Kind = ResultUpToDate
-				rep.UpToDate++
-			case opts.CheckOnly:
-				r.Kind = ResultAvailable
-				rep.Updates++
-			default:
-				if err := installUpdate(ctx, res, task, outcome, slot); err != nil {
-					r.Kind, r.Err = ResultFailed, err
-					if h, ok := github.RateLimitHint(err); ok && rep.RateHint == "" {
-						rep.RateHint = h
-					}
-					rep.Failed++
-				} else {
-					r.Kind = ResultUpdated
-					rep.Updated++
-				}
+			if err := installUpdate(ctx, res, task, outcome, slot, installMu); err != nil {
+				r.Kind, r.Err = ResultFailed, err
+			} else {
+				r.Kind = ResultUpdated
 			}
 		}
-		// The unit's terminal event lands before its result callback: a
-		// terminal renderer finishes the unit's step line ("done: 1/4 …")
-		// just before the result line prints underneath it.
-		sink.emit(completionEvent(r, i+1, len(tasks)))
-		emit(r)
 	}
-	return rep, nil
+	return r
 }
 
 // completionEvent maps one decided Result to its terminal progress event.
@@ -185,8 +232,12 @@ func newResolver() (*resolver.Resolver, error) {
 // upstream tag and the upstream changelog (the Tukui/Wago inline text
 // precedent; never a signed download link) on the addon's existing state
 // entry. The download and install phases are reported through slot; the
-// terminal outcome is reported by Sync's outcome loop.
-func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult, slot progressSlot) error {
+// terminal outcome is reported by the caller right after the result is
+// stored. Downloads run in
+// parallel across units; installMu serializes the local state machinery —
+// the source build and the atomic installer — so concurrent units can
+// never race on the state file or the packager's git work.
+func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, outcome resolveResult, slot progressSlot, installMu *sync.Mutex) error {
 	dir, err := os.MkdirTemp("", "bfctl-sync-")
 	if err != nil {
 		return fmt.Errorf("create fetch directory: %w", err)
@@ -213,7 +264,10 @@ func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, o
 		if err != nil {
 			return err
 		}
-		if err := buildSourcePlan(ctx, outcome.plan, ref, task.flavor, dir); err != nil {
+		installMu.Lock()
+		err = buildSourcePlan(ctx, outcome.plan, ref, task.flavor, dir)
+		installMu.Unlock()
+		if err != nil {
 			return err
 		}
 		root = dir
@@ -230,6 +284,8 @@ func installUpdate(ctx context.Context, res *resolver.Resolver, task syncTask, o
 		return err
 	}
 	slot.emit(PhaseInstalling, Detail{Version: outcome.plan.Version, Ref: outcome.plan.Ref})
+	installMu.Lock()
+	defer installMu.Unlock()
 	return in.Install(ctx, installer.Request{Flavor: task.flavor, Addon: rec, SourceDir: root})
 }
 

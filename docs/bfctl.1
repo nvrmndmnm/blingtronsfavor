@@ -96,7 +96,8 @@ Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
-Addons are processed one at a time in report order.
+Addons are worked concurrently and their results are reported in report
+order.
 An update is the matching release asset when one serves the client, and a
 local source build
 .Pq .pkgmeta externals, keyword substitution, TOC flavor split
@@ -180,25 +181,27 @@ While
 .Cm sync , Cm add
 or
 .Cm adopt
-works, ongoing activity is reported on standard error as it happens, one
-unit at a time in report order: on a terminal each unit owns one live step
-line
+works, ongoing activity is reported on standard error as it happens.
+.Cm sync
+works on several addons at once, and on a terminal every addon owns one
+row of a live block
 .Pq spinner, rewritten in place
-that switches in place to its terminal step line when the unit finishes,
-just before the unit's result line prints underneath and the next unit's
-step line appears:
+that is visible from the start and tracks its own addon through the
+phases, flipping in place to its terminal line when the addon finishes:
 .Bd -literal -offset indent
-syncing: <index>/<total> <flavor>/<addon>
-done: <index>/<total> <flavor>/<addon>
+syncing: <index>/<total> <flavor>/<addon>: <phase>
+done: <index>/<total> <flavor>/<addon>: <version>
 .Ed
 .Pp
-The live line's verb names the flow
+The row's verb names the flow
 .Pq Ar syncing , adding , adopting ;
 the terminal phase replaces it with
 .Ar done , failed
 or
 .Ar skipped ,
-and a rate-limit wait appends its reason to the live line while it lasts.
+and the addon's result line then replaces that row outright, so every
+addon's whole story stays in one place.
+A rate-limit wait appends its reason to the row while it lasts.
 Over a pipe
 .Pq CI log, file
 the same work streams as one incremental plain line per event, without
@@ -221,14 +224,15 @@ Stream discipline: results and the
 report stay alone on standard output; progress and logs use standard
 error.
 The per-addon result lines and the summary keep their historical format,
-and redirected output stays plain and parseable, so
+and the result lines always stream in report order even though the work
+runs in parallel, so
 .Nm
 output is safe to pipe
 .Pq e.g. into jq
 or capture.
 On
 .Dv SIGINT
-the step in flight is kept as its live step line and the cursor restored before
+the rows in flight are kept as they are and the cursor restored before
 the rollback
 message prints
 .Pq see Sx SIGNALS .

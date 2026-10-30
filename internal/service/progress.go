@@ -44,8 +44,10 @@ type Detail struct {
 // ProgressEvent is one renderer-agnostic progress report: the phase one
 // unit of work just entered, its context and the unit's slot in the
 // workload counter (Index of Total, 1-based). Index names a unit's place
-// in the run; flows process one unit at a time, so events arrive in unit
-// order.
+// in the run; units run concurrently, so different units' events
+// interleave, while one unit's events always arrive in phase order —
+// resolving, then downloading and installing, then exactly one terminal
+// event.
 type ProgressEvent struct {
 	Unit   Unit
 	Phase  Phase

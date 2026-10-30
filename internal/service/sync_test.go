@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestInstallUpdateProvider(t *testing.T) {
 			Strategy:  state.StrategyDirect,
 		},
 	}
-	if err := installUpdate(context.Background(), nil, task, outcome, progressSlot{}); err != nil {
+	if err := installUpdate(context.Background(), nil, task, outcome, progressSlot{}, &sync.Mutex{}); err != nil {
 		t.Fatalf("installUpdate: %v", err)
 	}
 
@@ -146,7 +147,7 @@ func TestInstallUpdateProgress(t *testing.T) {
 		index: 2,
 		total: 3,
 	}
-	if err := installUpdate(context.Background(), nil, task, outcome, slot); err != nil {
+	if err := installUpdate(context.Background(), nil, task, outcome, slot, &sync.Mutex{}); err != nil {
 		t.Fatalf("installUpdate: %v", err)
 	}
 	want := []Phase{PhaseDownloading, PhaseInstalling}
@@ -186,7 +187,7 @@ func TestInstallUpdateRateLimitEvent(t *testing.T) {
 		index: 1,
 		total: 1,
 	}
-	if err := installUpdate(context.Background(), nil, task, outcome, slot); err == nil {
+	if err := installUpdate(context.Background(), nil, task, outcome, slot, &sync.Mutex{}); err == nil {
 		t.Fatal("installUpdate succeeded with a failing fetch")
 	}
 	if len(got) != 2 {
@@ -278,8 +279,8 @@ func TestResolveOneResolvingEvent(t *testing.T) {
 
 // TestSyncTerminalEventBeforeResult pins the per-unit presentation order:
 // a unit's terminal progress event is delivered before its result
-// callback, so a terminal renderer finishes the step line ("done: 1/1 …")
-// just before the result line prints underneath it.
+// callback, so a terminal renderer finishes the unit's row ("done: 1/1
+// …") before the printed result line replaces it.
 func TestSyncTerminalEventBeforeResult(t *testing.T) {
 	manual := &state.AddonState{
 		ID:       "ManualAddOn",
@@ -301,6 +302,42 @@ func TestSyncTerminalEventBeforeResult(t *testing.T) {
 	for i := range want {
 		if order[i] != want[i] {
 			t.Fatalf("got %v, want %v", order, want)
+		}
+	}
+}
+
+// TestSyncResultsReportedInReportOrder pins that concurrent units never
+// reorder the outcomes: whatever order the workers finish in, onResult is
+// called and rep.Results is filled strictly in the deterministic task
+// order — the frozen per-addon result lines stream in report order even
+// though the work runs in parallel.
+func TestSyncResultsReportedInReportOrder(t *testing.T) {
+	manual := func(id string) *state.AddonState {
+		return &state.AddonState{
+			ID:       id,
+			Strategy: state.StrategyManual,
+			Source:   state.SourceRef{Kind: state.SourceManual, Slug: id},
+		}
+	}
+	testState(t, manual("ManualC"), manual("ManualA"), manual("ManualB"))
+	var order []string
+	rep, err := Sync(context.Background(), SyncOptions{},
+		func(r Result) { order = append(order, r.AddonID) },
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	want := []string{"ManualA", "ManualB", "ManualC"} // collectTasks sorts by addon id
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("onResult order = %v, want %v", order, want)
+	}
+	if len(rep.Results) != len(want) {
+		t.Fatalf("report has %d results, want %d", len(rep.Results), len(want))
+	}
+	for i, r := range rep.Results {
+		if r.AddonID != want[i] {
+			t.Errorf("rep.Results[%d] = %s, want %s", i, r.AddonID, want[i])
 		}
 	}
 }
