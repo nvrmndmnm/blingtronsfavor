@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/itp5b5/blessforge/internal/service"
 )
@@ -187,6 +189,17 @@ type blockEntry struct {
 	texts []string
 }
 
+// ttySpinFPS is the live block's spinner frame rate. Tests replace it
+// with a long interval and drive ttyProgress.tick directly, so spinner
+// phases advance on a controlled tick in CI — no timing flakiness (XD-41).
+var ttySpinFPS = spinner.Dot.FPS
+
+// fdWriter is the writer capability the terminal-width probe needs: an
+// *os.File (os.Stderr in production) exposes its file descriptor.
+type fdWriter interface {
+	Fd() uintptr
+}
+
 // ttyProgress keeps a live block with one row per unit on a terminal
 // stderr — the presentation the sync UX is built on: every unit's row is
 // visible at once, each row tracking its own addon through the phases
@@ -195,7 +208,9 @@ type blockEntry struct {
 // forever/DeadlyBossMods: 12.1.18") when the unit finishes. A result
 // printed through Print replaces the unit's row with the frozen result
 // line, so an addon's whole story stays in one place and nothing spews as
-// a chunk. The spinner keeps turning on live rows between events so long
+// a chunk. Every drawn row is clamped to the terminal width, so a long
+// version string can never soft-wrap and corrupt the redraw geometry.
+// The spinner keeps turning on live rows between events so long
 // waits never look like a hang (objective O1), and a rate-limit wait (risk
 // R6) shows its reason on the row while it lasts. Only rows are ever
 // rewritten; every other line lands whole in the scrollback. The spinner
@@ -248,7 +263,7 @@ func newTTYProgress(w, out io.Writer, verb string) *ttyProgress {
 // spin advances the spinner frame at the TUI's frame rate until Stop.
 func (p *ttyProgress) spin() {
 	defer close(p.stopped)
-	t := time.NewTicker(spinner.Dot.FPS)
+	t := time.NewTicker(ttySpinFPS)
 	defer t.Stop()
 	for {
 		select {
@@ -446,11 +461,41 @@ func (p *ttyProgress) Stop() {
 	})
 }
 
+// terminalWidth reports the display width of the renderer's terminal
+// stream — 0 when the stream is not a terminal. Re-probed on every draw so
+// a resize mid-run can never leave stale geometry.
+func (p *ttyProgress) terminalWidth() int {
+	w, ok := p.w.(fdWriter)
+	if !ok {
+		return 0
+	}
+	width, _, err := term.GetSize(w.Fd())
+	if err != nil {
+		return 0
+	}
+	return width
+}
+
+// clampLineWidth cuts one drawn row to the terminal's width so a long
+// version string can never soft-wrap and corrupt the redraw geometry —
+// every row stays exactly one screen line (the long-line drift guard). A
+// width of 0 (not a terminal) leaves the row untouched; the frozen stdout
+// lines Print writes are never clamped — only their redrawn screen copy is.
+func clampLineWidth(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	return ansi.Truncate(s, width, "")
+}
+
 // draw repaints the whole block in place: the cursor moves to the block's
 // top line, every line is rewritten there, and any line the block no longer
 // has is erased. Rows are whole lines ending in "\n", so the cursor always
-// rests on a clean line below the block. Callers hold p.mu.
+// rests on a clean line below the block. Each row is clamped to the
+// terminal width, so the line count always matches the block geometry.
+// Callers hold p.mu.
 func (p *ttyProgress) draw() {
+	width := p.terminalWidth()
 	if !p.hidden {
 		_, _ = fmt.Fprint(p.w, "\x1b[?25l")
 		p.hidden = true
@@ -464,7 +509,7 @@ func (p *ttyProgress) draw() {
 			if e.live && j == 0 {
 				prefix = p.frames[p.frame]
 			}
-			_, _ = fmt.Fprintf(p.w, "\r\x1b[2K%s\n", prefix+text)
+			_, _ = fmt.Fprintf(p.w, "\r\x1b[2K%s\n", clampLineWidth(prefix+text, width))
 		}
 	}
 	n := p.totalLines()
