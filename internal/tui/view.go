@@ -63,6 +63,15 @@ func (m *Model) layout() {
 	if m.filtering || m.filter != "" {
 		overhead++
 	}
+	if m.addInput {
+		overhead++
+		if m.addText != "" {
+			overhead++ // the validation hint or error line
+		}
+	}
+	if m.addChoose {
+		overhead++
+	}
 	if m.wait != "" {
 		overhead++
 	}
@@ -107,6 +116,21 @@ func (m Model) render() string {
 	if m.filtering || m.filter != "" {
 		fmt.Fprintf(&b, "filter: %s▌\n", m.filter)
 	}
+	if m.addInput {
+		fmt.Fprintf(&b, "add: %s▌\n", m.addText)
+		switch {
+		case m.addErr != nil:
+			b.WriteString(failedStyle.Render(clean(m.addErr.Error())))
+			b.WriteString("\n")
+		case m.addParsed.Kind != "":
+			b.WriteString(dimStyle.Render("→ " + addRefLabel(m.addParsed)))
+			b.WriteString("\n")
+		}
+	}
+	if m.addChoose {
+		b.WriteString(m.flavorPrompt())
+		b.WriteString("\n")
+	}
 	if m.wait != "" {
 		b.WriteString(m.wait)
 		b.WriteString("\n")
@@ -115,6 +139,40 @@ func (m Model) render() string {
 	b.WriteString("\n")
 	b.WriteString(m.helpBar())
 	return b.String()
+}
+
+// addRefLabel renders the parsed reference the way the add flow will
+// install it: "github owner/repo", "wago <key>", "curseforge <key>" or
+// "git <remote>".
+func addRefLabel(ref service.AddRef) string {
+	switch ref.Kind {
+	case state.SourceGitHub:
+		return "github " + ref.Repo.Slug()
+	case state.SourceWago:
+		return "wago " + ref.Key
+	case state.SourceCfwidget:
+		return "curseforge " + ref.Key
+	default:
+		return "git " + ref.URL
+	}
+}
+
+// flavorPrompt renders the target-flavor question asked when several
+// clients are configured: the flavors as numbered choices with the cursor
+// on the active one — the default Enter accepts.
+func (m Model) flavorPrompt() string {
+	parts := make([]string, 0, len(m.status.Clients))
+	for i, c := range m.status.Clients {
+		label := fmt.Sprintf("%d %s", i+1, c.FlavorName)
+		if c.Flavor == m.client.Flavor {
+			label += " (active)"
+		}
+		if i == m.addCursor {
+			label = headerStyle.Render(label)
+		}
+		parts = append(parts, label)
+	}
+	return "add to flavor: " + strings.Join(parts, dimStyle.Render(" · ")) + dimStyle.Render(" — up/down picks, enter adds, esc cancels")
 }
 
 // header renders the flavor badge — "Forever 1.60.1" — and the client root.
@@ -159,12 +217,12 @@ func (m Model) detailPane() string {
 	return detailStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
-// statusBar renders the status line: the sync run frame — "syncing 2/4 ·
-// 1 done · 1 failed" — beside the spinner while a sync runs (any message
-// the user's keys set shows next to it), and the plain status line
+// statusBar renders the status line: the run frame — "syncing 2/4 ·
+// 1 done · 1 failed" — beside the spinner while a sync or add runs (any
+// message the user's keys set shows next to it), and the plain status line
 // otherwise.
 func (m Model) statusBar() string {
-	if m.syncing {
+	if m.syncing || m.adding {
 		line := m.spin.View() + m.runFrame()
 		if m.statusLine != "" {
 			line += "  " + statusStyle.Render(m.statusLine)

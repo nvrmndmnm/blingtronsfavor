@@ -20,83 +20,6 @@ import (
 	"github.com/itp5b5/blessforge/internal/state"
 )
 
-// TestParseWagoRef pins the accepted Wago reference shapes: the addon page
-// URL — with query strings, trailing slashes and deep links stripped — and
-// the direct "wago:<key>" short form. Anything else stays with the GitHub
-// or git-remote paths.
-func TestParseWagoRef(t *testing.T) {
-	cases := map[string]string{
-		"https://addons.wago.io/addons/eqol":                  "eqol",
-		"https://addons.wago.io/addons/eqol/":                 "eqol",
-		"https://addons.wago.io/addons/eqol?stability=stable": "eqol",
-		"https://addons.wago.io/addons/eqol/versions":         "eqol",
-		"https://addons.wago.io/addons/eqol/versions#latest":  "eqol",
-		"https://www.addons.wago.io/addons/VBNBxKx5":          "VBNBxKx5",
-		"HTTPS://ADDONS.WAGO.IO/ADDONS/Eqol":                  "Eqol",
-		"wago:eqol":                                           "eqol",
-		"wago:VBNBxKx5":                                       "VBNBxKx5",
-		"wago:12345":                                          "12345",
-		"  wago:eqol  ":                                       "eqol",
-	}
-	for raw, want := range cases {
-		got, ok := parseWagoRef(raw)
-		if !ok || got != want {
-			t.Errorf("parseWagoRef(%q) = %q, %v; want %q, true", raw, got, ok, want)
-		}
-	}
-	rejects := []string{
-		"", "wago:", "wago:/", "owner/repo",
-		"https://github.com/owner/repo", "https://gitlab.com/group/addon.git",
-		"https://example.com/addons/eqol", "https://wago.io/eqol",
-		"https://addons.wago.io/", "https://addons.wago.io/addons/",
-		"https://addons.wago.io/addon/eqol", "https://addons.wago.io/addons",
-	}
-	for _, raw := range rejects {
-		if got, ok := parseWagoRef(raw); ok {
-			t.Errorf("parseWagoRef(%q) = %q, true; want a rejection", raw, got)
-		}
-	}
-}
-
-// TestParseCfRef pins the accepted CurseForge reference shapes: the addon
-// page URL — with query strings, trailing slashes and deep links stripped —
-// and the direct "cfwidget:<key>" short form (slug or numeric project ID).
-// Anything else stays with the GitHub or git-remote paths.
-func TestParseCfRef(t *testing.T) {
-	cases := map[string]string{
-		"https://www.curseforge.com/wow/addons/auctionator":               "auctionator",
-		"https://www.curseforge.com/wow/addons/auctionator/":              "auctionator",
-		"https://www.curseforge.com/wow/addons/auctionator/files":         "auctionator",
-		"https://www.curseforge.com/wow/addons/auctionator/files/9202791": "auctionator",
-		"https://www.curseforge.com/wow/addons/details?class=warrior":     "details",
-		"https://curseforge.com/wow/addons/Details":                       "Details",
-		"HTTPS://WWW.CURSEFORGE.COM/WOW/ADDONS/Auctionator":               "Auctionator",
-		"cfwidget:61284":       "61284",
-		"cfwidget:auctionator": "auctionator",
-		"  cfwidget:61284  ":   "61284",
-	}
-	for raw, want := range cases {
-		got, ok := parseCfRef(raw)
-		if !ok || got != want {
-			t.Errorf("parseCfRef(%q) = %q, %v; want %q, true", raw, got, ok, want)
-		}
-	}
-	rejects := []string{
-		"", "cfwidget:", "cfwidget:/", "owner/repo",
-		"https://github.com/owner/repo", "https://gitlab.com/group/addon.git",
-		"https://www.curseforge.com/wow/addons/", "https://www.curseforge.com/wow/addons",
-		"https://www.curseforge.com/wow/addon/auctionator",
-		"https://www.curseforge.com/minecraft/mc-mods/jei",
-		"https://example.com/wow/addons/auctionator",
-		"https://addons.wago.io/addons/eqol",
-	}
-	for _, raw := range rejects {
-		if got, ok := parseCfRef(raw); ok {
-			t.Errorf("parseCfRef(%q) = %q, true; want a rejection", raw, got)
-		}
-	}
-}
-
 // TestAddWagoRejectsGitFlags pins the flag contract: --branch and --strategy
 // only apply to GitHub repositories, so Wago references reject them before
 // touching state or the network.
@@ -195,9 +118,9 @@ func TestAddWagoInstallsAndRecords(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	key, ok := parseWagoRef("https://addons.wago.io/addons/eqol")
+	key, ok := service.ParseWagoRef("https://addons.wago.io/addons/eqol")
 	if !ok {
-		t.Fatal("parseWagoRef rejected the addon page URL")
+		t.Fatal("ParseWagoRef rejected the addon page URL")
 	}
 	prov := &provider.Wago{Base: srv.URL, HTTP: srv.Client(), Flavor: client.FlavorMainline}
 	ref := state.SourceRef{Kind: state.SourceWago, Slug: key}
@@ -285,9 +208,9 @@ func TestAddCfwidgetInstallsAndRecords(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	key, ok := parseCfRef("https://www.curseforge.com/wow/addons/details")
+	key, ok := service.ParseCfRef("https://www.curseforge.com/wow/addons/details")
 	if !ok {
-		t.Fatal("parseCfRef rejected the addon page URL")
+		t.Fatal("ParseCfRef rejected the addon page URL")
 	}
 	prov := &provider.Cfwidget{Base: srv.URL, CDN: srv.URL, Flavor: client.FlavorMainline, Interface: 120100}
 	ref := state.SourceRef{Kind: state.SourceCfwidget, Slug: key}

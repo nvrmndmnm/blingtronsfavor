@@ -82,18 +82,27 @@ type Model struct {
 
 	width, height int
 
-	detail     bool   // detail pane open
-	filtering  bool   // "/" filter input active
-	filter     string // case-insensitive name filter
-	confirm    bool   // delete confirmation pending
-	syncing    bool   // a service.Sync is running
-	cancelSync context.CancelFunc
-	run        *syncRun  // the running sync's live state, nil when idle
-	live       liveState // last sample of the run state (rows, counters)
-	wait       string    // rate-limit wait line while one lasts
-	statusLine string
-	results    map[string]service.Result // last sync result per addon id
-	quitting   bool
+	detail        bool               // detail pane open
+	filtering     bool               // "/" filter input active
+	filter        string             // case-insensitive name filter
+	confirm       bool               // delete confirmation pending
+	addInput      bool               // "a" add input active
+	addText       string             // the reference being typed
+	addParsed     service.AddRef     // live parse of addText
+	addErr        error              // live parse error, nil while the ref parses
+	addChoose     bool               // target-flavor prompt active (several clients)
+	addCursor     int                // flavor prompt cursor
+	adding        bool               // a service.Add is running
+	addRow        *service.AddonRow  // provisional row for the addon being added
+	syncing       bool               // a service.Sync is running
+	cancelSync    context.CancelFunc // cancels the running sync or add (installer rollback)
+	run           *syncRun           // the running sync's live state, nil when idle
+	live          liveState          // last sample of the run state (rows, counters)
+	wait          string             // rate-limit wait line while one lasts
+	statusLine    string
+	results       map[string]service.Result // last sync result per addon id
+	pendingFlavor string                    // flavor to show once the next snapshot lands (after an add)
+	quitting      bool
 }
 
 // NewModel builds the initial model and loads the status synchronously so
@@ -135,8 +144,21 @@ func (m *Model) pickClient() {
 	m.client = m.status.Clients[0]
 }
 
+// activeClientIndex is the position of the active client in the status
+// report — the target-flavor prompt's default (the one Enter accepts).
+func (m Model) activeClientIndex() int {
+	for i, c := range m.status.Clients {
+		if c.Flavor == m.client.Flavor {
+			return i
+		}
+	}
+	return 0
+}
+
 // refreshRows rebuilds the visible rows (applying the filter) and the table
-// rows on top of them.
+// rows on top of them. While an add runs, the addon being added gets a
+// provisional row — the live-row treatment — until the refreshed snapshot
+// carries the real one.
 func (m *Model) refreshRows() {
 	m.rows = nil
 	for _, a := range m.client.Addons {
@@ -144,6 +166,22 @@ func (m *Model) refreshRows() {
 			continue
 		}
 		m.rows = append(m.rows, a)
+	}
+	if m.addRow != nil && containsFold(m.addRow.Name, m.filter) {
+		seen := false
+		for _, a := range m.rows {
+			if a.ID == m.addRow.ID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			a := *m.addRow
+			if l, ok := m.live.rows[a.ID]; ok && l.detail.Version != "" {
+				a.Upstream = clean(l.detail.Version)
+			}
+			m.rows = append(m.rows, a)
+		}
 	}
 	rows := make([]table.Row, 0, len(m.rows))
 	for _, a := range m.rows {
@@ -157,6 +195,18 @@ func (m *Model) refreshRows() {
 		rows = append(rows, cells)
 	}
 	m.table.SetRows(rows)
+}
+
+// validateAdd re-parses the add input through the same parsers "bfctl add"
+// uses, keeping the inline hint or error in step with the typing.
+func (m *Model) validateAdd() {
+	m.addParsed = service.AddRef{}
+	m.addErr = nil
+	if m.addText == "" {
+		return
+	}
+	ref, err := service.ParseAddRef(m.addText)
+	m.addParsed, m.addErr = ref, err
 }
 
 // statusText renders the Status cell — the addon's live row while a sync
@@ -247,15 +297,19 @@ func (m Model) failed(id string) bool {
 	return ok && r.Kind == service.ResultFailed
 }
 
-// runFrame renders the sync run frame the status bar shows while a sync
+// runFrame renders the run frame the status bar shows while a sync or add
 // runs: how far the run has come and how it is going — "syncing 2/4 · 1
 // done · 1 failed".
 func (m Model) runFrame() string {
-	if m.live.total == 0 {
-		return "syncing…"
+	verb := "syncing"
+	if m.adding {
+		verb = "adding"
 	}
-	s := fmt.Sprintf("syncing %d/%d · %d done · %d failed",
-		m.live.done+m.live.failed+m.live.skipped, m.live.total, m.live.done, m.live.failed)
+	if m.live.total == 0 {
+		return verb + "…"
+	}
+	s := fmt.Sprintf("%s %d/%d · %d done · %d failed",
+		verb, m.live.done+m.live.failed+m.live.skipped, m.live.total, m.live.done, m.live.failed)
 	if m.live.skipped > 0 {
 		s += fmt.Sprintf(" · %d skipped", m.live.skipped)
 	}

@@ -7,7 +7,7 @@ import (
 // keyMap is the TUI key map, exactly the bindings the UX contract fixes:
 //
 //	u update all · s toggle release/branch · d delete (confirm) ·
-//	enter detail pane · / filter · q quit
+//	a add · enter detail pane · / filter · q quit
 //
 // It also satisfies bubbles' help.KeyMap so the bottom bar can render it.
 type keyMap struct {
@@ -16,6 +16,7 @@ type keyMap struct {
 	Detail  key.Binding
 	Filter  key.Binding
 	Update  key.Binding
+	Add     key.Binding
 	Track   key.Binding
 	Delete  key.Binding
 	Confirm key.Binding
@@ -30,6 +31,7 @@ func newKeyMap() keyMap {
 		Detail:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Update:  key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
+		Add:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		Track:   key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "release/branch")),
 		Delete:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		Confirm: key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y", "confirm")),
@@ -40,13 +42,13 @@ func newKeyMap() keyMap {
 
 // ShortHelp renders the compact bottom help bar.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Update, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
+	return []key.Binding{k.Update, k.Add, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
 }
 
 // FullHelp renders the two-row help page.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Detail, k.Filter},
-		{k.Update, k.Track, k.Delete, k.Quit},
+		{k.Update, k.Add, k.Track, k.Delete, k.Quit},
 	}
 }
