@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/table"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -16,20 +17,61 @@ var (
 	dimStyle    = lipgloss.NewStyle().Faint(true)
 	detailStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 	statusStyle = lipgloss.NewStyle().Faint(true)
+	failedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 )
 
-// layout fits the table into the terminal: the header, status line and help
-// bar take fixed rows, the detail pane opens and closes.
+const (
+	// cellPad is what the table style's Padding(0, 1) adds to each cell.
+	cellPad = 2
+	// minStatusWidth keeps the live row and the outcome words readable:
+	// "updated 12.1.17 → 12.1.18" fits without truncation.
+	minStatusWidth = 26
+)
+
+// columnsFor sizes the table columns for the terminal width. The first
+// four columns are fixed; Status absorbs whatever is left (never below
+// minStatusWidth), so the live row and its outcome stay readable on wide
+// terminals without ever being worse on narrow ones.
+func columnsFor(width int) []table.Column {
+	cols := []table.Column{
+		{Title: "Addon", Width: 22},
+		{Title: "Installed", Width: 11},
+		{Title: "Upstream", Width: 12},
+		{Title: "Strategy", Width: 11},
+	}
+	used := cellPad * (len(cols) + 1)
+	for _, c := range cols {
+		used += c.Width
+	}
+	status := width - 2 - used
+	if status < minStatusWidth {
+		status = minStatusWidth
+	}
+	return append(cols, table.Column{Title: "Status", Width: status})
+}
+
+// layout fits the table into the terminal: the header, status line and
+// help bar take fixed rows, and the detail pane, filter line and
+// rate-limit wait line open and close. It is a pure function of the model
+// state and the terminal size (risk R1) — recompute it whenever either
+// changes — and it sizes the table columns the same way.
 func (m *Model) layout() {
 	overhead := 5 // header (2) + status (1) + help (1) + margin
 	if m.detail {
-		overhead += 7
+		overhead += lipgloss.Height(m.detailPane())
+	}
+	if m.filtering || m.filter != "" {
+		overhead++
+	}
+	if m.wait != "" {
+		overhead++
 	}
 	h := m.height - overhead
 	if h < 3 {
 		h = 3
 	}
 	m.table.SetHeight(h)
+	m.table.SetColumns(columnsFor(m.width))
 	m.table.SetWidth(m.width - 2)
 }
 
@@ -65,6 +107,10 @@ func (m Model) render() string {
 	if m.filtering || m.filter != "" {
 		fmt.Fprintf(&b, "filter: %s▌\n", m.filter)
 	}
+	if m.wait != "" {
+		b.WriteString(m.wait)
+		b.WriteString("\n")
+	}
 	b.WriteString(m.statusBar())
 	b.WriteString("\n")
 	b.WriteString(m.helpBar())
@@ -80,8 +126,8 @@ func (m Model) header() string {
 	return badge + "  " + dimStyle.Render(m.client.Root)
 }
 
-// detailPane renders the selected addon's detail: source, tracking, plan
-// reason of the last sync and the owned directories.
+// detailPane renders the selected addon's detail: source, tracking, the
+// error and plan reason of the last sync and the owned directories.
 func (m Model) detailPane() string {
 	a := m.selected()
 	if a == nil {
@@ -98,8 +144,13 @@ func (m Model) detailPane() string {
 	if len(a.Dirs) > 0 {
 		lines = append(lines, "Dirs      "+strings.Join(a.Dirs, ", "))
 	}
-	if r, ok := m.results[a.ID]; ok && r.Plan.Reason != "" {
-		lines = append(lines, "Plan      "+r.Plan.Reason)
+	if r, ok := m.resultFor(a.ID); ok {
+		if r.Err != nil {
+			lines = append(lines, "Error     "+clean(r.Err.Error()))
+		}
+		if r.Plan.Reason != "" {
+			lines = append(lines, "Plan      "+r.Plan.Reason)
+		}
 	}
 	width := m.width - 4
 	if width < 20 {
@@ -108,10 +159,17 @@ func (m Model) detailPane() string {
 	return detailStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
-// statusBar renders the status line, with the spinner while a sync runs.
+// statusBar renders the status line: the sync run frame — "syncing 2/4 ·
+// 1 done · 1 failed" — beside the spinner while a sync runs (any message
+// the user's keys set shows next to it), and the plain status line
+// otherwise.
 func (m Model) statusBar() string {
 	if m.syncing {
-		return m.spin.View() + " " + m.statusLine
+		line := m.spin.View() + m.runFrame()
+		if m.statusLine != "" {
+			line += "  " + statusStyle.Render(m.statusLine)
+		}
+		return line
 	}
 	return statusStyle.Render(m.statusLine)
 }

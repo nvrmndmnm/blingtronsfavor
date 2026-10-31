@@ -12,9 +12,6 @@ import (
 	"github.com/itp5b5/blessforge/internal/service"
 )
 
-// syncResultMsg delivers one per-addon sync outcome while the sync runs.
-type syncResultMsg struct{ result service.Result }
-
 // syncDoneMsg delivers the final sync report (or its error).
 type syncDoneMsg struct {
 	report service.Report
@@ -56,19 +53,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		if m.syncing && m.run != nil {
+			// Sample the running sync's state on the spinner tick:
+			// redraws are rate-limited to the tick (risk R3), so a
+			// burst of events can never flicker or spew as a batch.
+			m.live = m.run.sample()
+			m.wait = m.live.wait
+			m.refreshRows()
+			m.layout()
+		}
 		return m, cmd
-	case syncResultMsg:
-		m.results[msg.result.AddonID] = msg.result
-		m.refreshRows()
-		return m, nil
 	case syncDoneMsg:
 		m.syncing = false
 		m.cancelSync = nil
+		m.finishSync()
+		m.wait = ""
 		if msg.err != nil {
 			m.statusLine = "sync failed: " + msg.err.Error()
 		} else {
 			m.statusLine = msg.report.Summary()
+			if msg.report.RateHint != "" {
+				m.wait = "rate limited, " + msg.report.RateHint
+			}
 		}
+		m.layout()
 		return m, loadStatus()
 	case statusMsg:
 		if msg.err != nil {
@@ -131,6 +139,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.refreshRows()
+		m.layout()
 		return m, nil
 	}
 
@@ -150,6 +159,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.cancelOrQuit()
 	case key.Matches(msg, m.keys.Detail):
 		m.detail = !m.detail
+		m.layout()
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.statusLine = "filter: type to narrow the list, enter applies, esc clears"
@@ -175,11 +185,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // cancelOrQuit is the quit key's behavior: a running sync is cancelled
-// first — its in-flight install rolls back through the installer — and the
-// TUI quits on the next press.
+// first — its in-flight install rolls back through the installer, which
+// the confirmation states — and the TUI quits on the next press.
 func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
 	if m.syncing {
-		m.statusLine = "sync cancelled — rolling back (press q again to quit)"
+		m.statusLine = "cancelling — the in-flight install rolls back"
 		if m.cancelSync != nil {
 			m.cancelSync()
 			m.cancelSync = nil
@@ -191,24 +201,47 @@ func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
 }
 
 // startSync kicks off service.Sync in a goroutine — the same call "bfctl
-// sync" makes — and keeps the spinner turning until it reports back.
+// sync" makes — wired to the live run state: the service layer's
+// ProgressEvent stream and its result callback write the run state as the
+// work happens (no per-event messages), and the spinner tick samples it
+// into the addon rows and the status bar. The spinner keeps turning until
+// the run reports back.
 func (m Model) startSync() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.ctx)
+	run := newSyncRun()
 	m.syncing = true
 	m.cancelSync = cancel
-	m.statusLine = "syncing…"
+	m.run = run
+	m.live = liveState{}
+	m.wait = ""
+	m.statusLine = ""
 	m.rt.wg.Add(1)
 	go func() {
 		defer m.rt.wg.Done()
 		defer cancel()
-		report, err := service.Sync(ctx, service.SyncOptions{}, func(r service.Result) {
-			m.rt.send(syncResultMsg{result: r})
-		}, nil)
+		report, err := service.Sync(ctx, service.SyncOptions{}, run.recordResult, run.record)
 		m.rt.send(syncDoneMsg{report: report, err: err})
 	}()
 	var spinCmd tea.Cmd
 	m.spin, spinCmd = m.spin.Update(m.spin.Tick())
 	return m, spinCmd
+}
+
+// finishSync folds the last of the running sync into the model: the
+// decided outcomes land in the results map — where the rows and the
+// detail pane keep them after the run — and the live rows are dropped.
+func (m *Model) finishSync() {
+	if m.run != nil {
+		m.live = m.run.sample()
+		m.run = nil
+	}
+	for id, row := range m.live.rows {
+		if row.result != nil {
+			m.results[id] = *row.result
+		}
+	}
+	m.live = liveState{}
+	m.refreshRows()
 }
 
 // doToggle flips the selected addon between release tracking and branch
