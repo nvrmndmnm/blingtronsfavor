@@ -185,7 +185,7 @@ func (m Model) detailContent(a *service.AddonRow, width int) []string {
 	if a == nil {
 		return []string{th.dim.Render("no addon selected")}
 	}
-	word := m.statusText(a)
+	word := m.statusText(*a)
 	fields := []detailField{
 		{label: "Source", value: sourceText(a), style: th.dim},
 		{label: "Tracking", value: dash(a.Tracking), style: th.dim},

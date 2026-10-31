@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"runtime"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -93,8 +93,8 @@ func TestLocaleUTF8(t *testing.T) {
 		t.Error("LC_ALL=C must take precedence over LANG=C.UTF-8")
 	}
 	clearLocale()
-	if got := localeUTF8(); got != (runtime.GOOS == "windows") {
-		t.Errorf("no locale set: UTF-8 = %v, want %v", got, runtime.GOOS == "windows")
+	if got := localeUTF8(); got != (goruntime.GOOS == "windows") {
+		t.Errorf("no locale set: UTF-8 = %v, want %v", got, goruntime.GOOS == "windows")
 	}
 }
 

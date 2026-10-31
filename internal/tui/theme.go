@@ -3,7 +3,7 @@ package tui
 import (
 	"image/color"
 	"os"
-	"runtime"
+	goruntime "runtime"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -38,7 +38,7 @@ func localeUTF8() bool {
 			return strings.Contains(strings.ToLower(val), "utf")
 		}
 	}
-	return runtime.GOOS == "windows"
+	return goruntime.GOOS == "windows"
 }
 
 // glyphs is the terminal-glyph vocabulary of the TUI. The status glyphs
