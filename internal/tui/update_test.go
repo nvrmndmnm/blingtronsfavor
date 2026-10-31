@@ -179,6 +179,20 @@ func firstNote(t *testing.T, m Model) int {
 	return n
 }
 
+// changelogLine reports the content index of the first changelog line in
+// the detail pane — the metadata fields above it scroll first.
+func changelogLine(t *testing.T, m Model) int {
+	t.Helper()
+	lines, _ := m.detailViewport()
+	for i, line := range lines {
+		if strings.Contains(line, "line-") {
+			return i
+		}
+	}
+	t.Fatal("no changelog line in the detail content")
+	return 0
+}
+
 // TestEnterFocusesDetailPaneAndScrolls pins the A3 interaction: enter
 // focuses the detail pane, the scroll keys drive it (the table cursor
 // stays put) and clamp at the end of the content, a cursor move resets the
@@ -207,7 +221,9 @@ func TestEnterFocusesDetailPaneAndScrolls(t *testing.T) {
 		t.Fatal("enter should focus the detail pane")
 	}
 
-	// down scrolls one content line and leaves the cursor alone.
+	// down scrolls one content line and leaves the cursor alone. The
+	// metadata fields above the changelog scroll first, so the topmost
+	// note starts moving only once the scroll passes them.
 	first := firstNote(t, m)
 	for i := 0; i < 5; i++ {
 		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
@@ -218,16 +234,23 @@ func TestEnterFocusesDetailPaneAndScrolls(t *testing.T) {
 	if m.detailScroll != 5 {
 		t.Fatalf("detailScroll = %d, want 5", m.detailScroll)
 	}
+	notesAt := changelogLine(t, m)
+	if limit := m.detailScrollMax(); limit < notesAt+5 {
+		t.Fatalf("detailScrollMax = %d, want at least %d — the notes must scroll", limit, notesAt+5)
+	}
+	for m.detailScroll < notesAt+5 {
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	}
 	if got := firstNote(t, m); got != first+5 {
 		t.Fatalf("topmost changelog line = %d, want %d", got, first+5)
 	}
 
 	// pgdn steps a page and clamps at the end of the content.
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyPgDn})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if m.detailScroll != m.detailScrollMax() {
 		t.Fatalf("detailScroll = %d, want the clamp at %d", m.detailScroll, m.detailScrollMax())
 	}
-	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyPgDn})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if m.detailScroll != m.detailScrollMax() {
 		t.Fatalf("detailScroll = %d, scrolling ran past the content", m.detailScroll)
 	}
