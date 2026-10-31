@@ -51,7 +51,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.layout()
 		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -179,7 +178,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // TUI quits on the next press.
 func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
 	if m.syncing {
-		m.statusLine = "sync cancelled — rolling back (press q again to quit)"
+		m.statusLine = fmt.Sprintf("sync cancelled %s rolling back (press q again to quit)", m.theme.g.Dash)
 		if m.cancelSync != nil {
 			m.cancelSync()
 			m.cancelSync = nil
@@ -196,7 +195,7 @@ func (m Model) startSync() (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.syncing = true
 	m.cancelSync = cancel
-	m.statusLine = "syncing…"
+	m.statusLine = "syncing" + m.theme.g.Ellipsis
 	m.rt.wg.Add(1)
 	go func() {
 		defer m.rt.wg.Done()
@@ -234,7 +233,7 @@ func (m Model) doDelete() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	id, flavor := a.ID, client.Flavor(m.client.Flavor)
-	m.statusLine = "deleting " + id + "…"
+	m.statusLine = "deleting " + id + m.theme.g.Ellipsis
 	return m, func() tea.Msg {
 		err := service.RemoveAddon(m.ctx, flavor, id)
 		return deleteMsg{id: id, err: err}

@@ -17,6 +17,12 @@ import (
 // testModel points bfctl's config and cache at fresh temp directories with
 // one forever client and two addons, and builds the initial model.
 func testModel(t *testing.T) Model {
+	return testModelOpts(t, Options{})
+}
+
+// testModelOpts is testModel with explicit TUI options (the --ascii flag
+// path).
+func testModelOpts(t *testing.T, opts Options) Model {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
@@ -39,7 +45,7 @@ func testModel(t *testing.T) Model {
 	if err := state.Open(path).Save(st); err != nil {
 		t.Fatal(err)
 	}
-	return NewModel(context.Background(), Options{}, &runtime{})
+	return NewModel(context.Background(), opts, &runtime{})
 }
 
 // keyMsg builds one printable key press.

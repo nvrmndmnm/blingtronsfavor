@@ -12,6 +12,7 @@ import (
 // service layer — the TUI only renders and dispatches.
 func runTUI(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("tui")
+	ascii := fs.Bool("ascii", false, "ASCII-only glyphs: degrade the status glyphs, punctuation and borders to plain ASCII")
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -20,7 +21,7 @@ func runTUI(args []string, bi BuildInfo) int {
 		subcommandUsage(fs)
 		return ExitUsage
 	}
-	if err := tui.Run(tui.Options{Version: bi.Version}); err != nil {
+	if err := tui.Run(tui.Options{Version: bi.Version, ASCII: *ascii}); err != nil {
 		fmt.Fprintf(os.Stderr, "bfctl tui: %v\n", err)
 		return ExitError
 	}
