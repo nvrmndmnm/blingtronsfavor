@@ -94,6 +94,8 @@ type Model struct {
 	width, height int
 
 	detail        bool               // detail pane open
+	detailFocus   bool               // detail pane focused: the scroll keys drive it, enter returns to the table
+	detailScroll  int                // detail pane scroll offset (content lines)
 	filtering     bool               // "/" filter input active
 	filter        string             // case-insensitive name filter
 	confirm       bool               // delete confirmation pending
@@ -374,6 +376,27 @@ func clean(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// scrollDetail moves the detail pane's scroll offset by delta content
+// lines, clamped to the pane's viewport — scrolling can never run past the
+// end of the content whatever the terminal size (R7).
+func (m *Model) scrollDetail(delta int) {
+	m.detailScroll = clampInt(m.detailScroll+delta, 0, m.detailScrollMax())
+}
+
+// detailScrollMax is the largest detail scroll offset that still fills the
+// pane with content at the current size.
+func (m Model) detailScrollMax() int {
+	lines, visible := m.detailViewport()
+	return maxInt(0, len(lines)-maxInt(1, visible))
+}
+
+// detailPageSize is how many content lines the detail pane shows at once —
+// the scroll step of a page key.
+func (m Model) detailPageSize() int {
+	_, visible := m.detailViewport()
+	return maxInt(1, visible)
 }
 
 // counts summarizes the active client's addons for the header bar: the

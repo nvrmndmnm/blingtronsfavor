@@ -14,6 +14,8 @@ import (
 type keyMap struct {
 	Up        key.Binding
 	Down      key.Binding
+	PgUp      key.Binding
+	PgDn      key.Binding
 	Detail    key.Binding
 	Filter    key.Binding
 	Update    key.Binding
@@ -32,6 +34,8 @@ func newKeyMap(g glyphs) keyMap {
 	return keyMap{
 		Up:        key.NewBinding(key.WithKeys("up", "k"), key.WithHelp(g.Up+"/k", "up")),
 		Down:      key.NewBinding(key.WithKeys("down", "j"), key.WithHelp(g.Down+"/j", "down")),
+		PgUp:      key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
+		PgDn:      key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", "page down")),
 		Detail:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
@@ -52,10 +56,11 @@ func (k keyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
 }
 
-// FullHelp renders the two-row help page.
+// FullHelp renders the two-row help page: navigation plus the detail
+// pane's scroll keys.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Detail, k.Filter},
+		{k.Up, k.Down, k.PgUp, k.PgDn, k.Detail, k.Filter},
 		{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Quit},
 	}
 }

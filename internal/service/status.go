@@ -20,7 +20,8 @@ type AddonRow struct {
 	Upstream   string   `json:"upstream"`
 	Strategy   string   `json:"strategy"`
 	Tracking   string   `json:"tracking"`
-	Status     string   `json:"status"` // worst TOC compatibility verdict
+	Status     string   `json:"status"`             // worst TOC compatibility verdict
+	BuiltFor   []int    `json:"builtFor,omitempty"` // interface numbers the worst-verdict .toc files declare — the "built for 110002" facts behind the plain-language verdict
 	Dirs       []string `json:"dirs,omitempty"`
 	SourceKind string   `json:"sourceKind,omitempty"`
 	Source     string   `json:"source,omitempty"`
@@ -107,13 +108,14 @@ func clientRow(cs *state.ClientState) ClientRow {
 	if iface != 0 {
 		target = &toc.Target{Flavor: flavor, Interface: iface}
 	}
-	verdicts := tocVerdicts(cs, target)
+	scanned := tocAddons(cs, target)
 	for _, id := range ids {
 		a := cs.Addons[id]
 		src := a.Source.URL
 		if src == "" {
 			src = a.Source.Slug
 		}
+		status, builtFor := addonStatus(a, scanned)
 		row.Addons = append(row.Addons, AddonRow{
 			ID:         a.ID,
 			Name:       addonLabel(a),
@@ -122,7 +124,8 @@ func clientRow(cs *state.ClientState) ClientRow {
 			Upstream:   upstreamOr(a),
 			Strategy:   strategyOr(a),
 			Tracking:   trackingOr(a),
-			Status:     addonStatus(a, verdicts),
+			Status:     status,
+			BuiltFor:   builtFor,
 			Dirs:       a.OwnedDirs,
 			SourceKind: string(a.Source.Kind),
 			Source:     src,
@@ -132,20 +135,21 @@ func clientRow(cs *state.ClientState) ClientRow {
 	return row
 }
 
-// tocVerdicts scans the client's AddOns directory once and reports the
-// compatibility verdict per addon directory. A missing AddOns directory (or
-// an unmounted install) yields no verdicts.
-func tocVerdicts(cs *state.ClientState, target *toc.Target) map[string]toc.Verdict {
+// tocAddons scans the client's AddOns directory once and reports the
+// scanned addon per addon directory: its selected .toc and the
+// compatibility verdict. A missing AddOns directory (or an unmounted
+// install) yields no entries.
+func tocAddons(cs *state.ClientState, target *toc.Target) map[string]toc.Addon {
 	addons, err := toc.Scan(cs.AddonsDir(), target)
 	if err != nil {
 		slog.Debug("scan addons", "dir", cs.AddonsDir(), "error", err)
 		return nil
 	}
-	verdicts := make(map[string]toc.Verdict, len(addons))
+	byDir := make(map[string]toc.Addon, len(addons))
 	for _, addon := range addons {
-		verdicts[addon.Dir] = addon.Verdict
+		byDir[addon.Dir] = addon
 	}
-	return verdicts
+	return byDir
 }
 
 // addonLabel is the name shown in the Addon column.
@@ -159,22 +163,39 @@ func addonLabel(a *state.AddonState) string {
 // addonStatus renders the TOC compatibility of one addon: the worst verdict
 // across its owned directories, so one broken directory cannot hide. A
 // missing owned directory is the most severe finding ("Missing"); an addon
-// without owned directories renders "-".
-func addonStatus(a *state.AddonState, verdicts map[string]toc.Verdict) string {
+// without owned directories renders "-". builtFor lists the interface
+// numbers the worst-verdict directories' selected .toc files declare — the
+// facts behind the plain-language verdict ("built for 110002 — may be
+// outdated").
+func addonStatus(a *state.AddonState, addons map[string]toc.Addon) (status string, builtFor []int) {
 	if len(a.OwnedDirs) == 0 {
-		return "-"
+		return "-", nil
 	}
 	worst := toc.VerdictMatch
 	for _, dir := range a.OwnedDirs {
-		v, ok := verdicts[dir]
+		scanned, ok := addons[dir]
 		if !ok {
-			return "Missing"
+			return "Missing", nil
 		}
-		if v > worst {
-			worst = v
+		if scanned.Verdict > worst {
+			worst = scanned.Verdict
 		}
 	}
-	return worst.String()
+	seen := make(map[int]bool)
+	for _, dir := range a.OwnedDirs {
+		scanned := addons[dir]
+		if scanned.Verdict != worst || scanned.Toc == nil {
+			continue
+		}
+		for _, iface := range scanned.Toc.Interfaces {
+			if !seen[iface] {
+				seen[iface] = true
+				builtFor = append(builtFor, iface)
+			}
+		}
+	}
+	sort.Ints(builtFor)
+	return worst.String(), builtFor
 }
 
 // upstreamOr renders the last upstream tag the resolver recorded, or "-".

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/itp5b5/blessforge/internal/service"
 )
@@ -200,6 +201,133 @@ func TestStatusCellCarriesGlyphAndWord(t *testing.T) {
 	for _, want := range []string{"✓ up to date", "⚠ update 342", "✗ failed", "… manual"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("frame is missing %q", want)
+		}
+	}
+}
+
+// detailRow builds one row whose detail pane carries the whole A3 story:
+// the changelog, the TOC verdict facts, the owned directories and the
+// source URL.
+func detailRow() service.AddonRow {
+	return service.AddonRow{
+		ID:         "r1",
+		Name:       "rarescanner",
+		Installed:  "1.60.1.b1",
+		Upstream:   "1.60.1.b2",
+		Strategy:   "direct",
+		Tracking:   "stable",
+		Status:     "Mismatch",
+		BuiltFor:   []int{110002},
+		Dirs:       []string{"RareScanner", "RareScanner_Data"},
+		Source:     "https://github.com/o/r",
+		SourceKind: "github",
+		Changelog:  "- fixed the map overlay\n- updated the locales",
+	}
+}
+
+func TestDetailPaneCompletesTheStory(t *testing.T) {
+	row := detailRow()
+	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, []service.AddonRow{row})
+	m.client.Version = "1.60.1"
+	detail := strings.Join(m.detailContent(&row, 40), "\n")
+	for _, want := range []string{
+		"built for 110002",              // plain-language verdict …
+		"outdated",                      // … in two wrapped parts
+		"RareScanner, RareScanner_Data", // owned dirs
+		"https://github.com/o/r",        // source URL, in full
+		"Changelog",                     // the notes section …
+		"- fixed the map overlay",       // … with the installed version's notes
+		"- updated the locales",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail pane is missing %q:\n%s", want, detail)
+		}
+	}
+	if strings.Contains(detail, "Mismatch") {
+		t.Errorf("detail pane shows the bare verdict jargon:\n%s", detail)
+	}
+	// The screen shows the same story (the table keeps its short word).
+	content := m.View().Content
+	for _, want := range []string{"built for 110002", "RareScanner_Data", "https://github.com/o/r", "- fixed the map overlay"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("frame is missing %q", want)
+		}
+	}
+}
+
+func TestPlainStatusReplacesVerdictJargon(t *testing.T) {
+	m := viewTest(t, caps{unicode: true, color: true}, 100, 28, nil)
+	m.client.Version = "1.60.1"
+	tests := []struct {
+		row  service.AddonRow
+		word string
+		want string
+	}{
+		{service.AddonRow{Status: "Match"}, "Match", "matches Forever 1.60.1"},
+		{service.AddonRow{Status: "MultiMatch", BuiltFor: []int{15000, 16001}}, "MultiMatch", "matches Forever 1.60.1 (built for several versions)"},
+		{service.AddonRow{Status: "Mismatch", BuiltFor: []int{110002}}, "Mismatch", "built for 110002 — may be outdated"},
+		{service.AddonRow{Status: "Mismatch"}, "Mismatch", "built for an unknown interface — may be outdated"},
+		{service.AddonRow{Status: "NoToc"}, "NoToc", "ships no .toc file"},
+		{service.AddonRow{Status: "Missing"}, "Missing", "installed folder missing"},
+		{service.AddonRow{Status: "Unknown"}, "Unknown", "compatibility not checked"},
+		{service.AddonRow{Status: "-"}, "-", "-"},
+		// A sync outcome's word is already plain language and passes through.
+		{service.AddonRow{Status: "-"}, "updated 1.0 → 1.1", "updated 1.0 → 1.1"},
+	}
+	for _, tt := range tests {
+		if got := m.plainStatus(tt.row, tt.word); got != tt.want {
+			t.Errorf("plainStatus(%q) = %q, want %q", tt.word, got, tt.want)
+		}
+	}
+	// The dash follows the glyph set: ASCII mode gets "-".
+	m = viewTest(t, caps{unicode: false, color: false}, 100, 28, nil)
+	if got, want := m.plainStatus(service.AddonRow{BuiltFor: []int{110002}}, "Mismatch"), "built for 110002 - may be outdated"; got != want {
+		t.Errorf("ASCII plainStatus = %q, want %q", got, want)
+	}
+	if got, want := m.plainStatus(service.AddonRow{}, "Match"), "matches Forever"; got != want {
+		t.Errorf("plainStatus without a game version = %q, want %q", got, want)
+	}
+}
+
+func TestChangelogTextSanitizesAndClamps(t *testing.T) {
+	// Control bytes go to spaces, line endings normalize, text survives.
+	if got, want := changelogText("\x01note one\r\nnote two\x1b[0m", "…"), "note one\nnote two [0m"; got != want {
+		t.Fatalf("changelogText = %q, want %q", got, want)
+	}
+	// The clamp marks the cut and bounds the pane's content (R7).
+	long := changelogText(strings.Repeat("x", maxChangelogRunes+100), "…")
+	if n := len([]rune(long)); n != maxChangelogRunes+1 {
+		t.Fatalf("clamped changelog is %d runes, want %d", n, maxChangelogRunes+1)
+	}
+	if !strings.HasSuffix(long, "…") {
+		t.Fatal("the clamp must mark the cut")
+	}
+}
+
+func TestHugeUnprintableChangelogNeverCorruptsLayout(t *testing.T) {
+	row := detailRow()
+	row.Changelog = strings.Repeat("## 2.0.0 \x1b[31mbold\x07\r\n- item with text\r\n", 200)
+	rows := []service.AddonRow{row}
+	for _, w := range []int{60, 80, 100, 120, 200} {
+		for _, overlay := range []bool{false, true} {
+			m := viewTest(t, caps{unicode: true, color: true}, w, 28, rows)
+			m.detail = overlay
+			lines := strings.Split(m.View().Content, "\n")
+			if len(lines) != 28 {
+				t.Fatalf("width %d: frame has %d lines, want 28", w, len(lines))
+			}
+			for i, line := range lines {
+				if got := lipgloss.Width(line); got > w {
+					t.Fatalf("width %d (overlay=%v): line %d is %d cells wide:\n%q", w, overlay, i, got, line)
+				}
+				// The theme's own styling may color the line; past it no
+				// control byte from upstream text may survive (R7).
+				for _, r := range ansi.Strip(line) {
+					if r < 0x20 || r == 0x7f {
+						t.Fatalf("width %d (overlay=%v): line %d carries control byte %q:\n%q", w, overlay, i, r, line)
+					}
+				}
+			}
 		}
 	}
 }

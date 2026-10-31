@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -54,16 +55,7 @@ func (m Model) render() string {
 
 	// Add-flow geometry: the input line, its validation hint (once there is
 	// something to validate) and the target-flavor prompt.
-	addH := 0
-	if m.addInput {
-		addH = 1
-		if m.addText != "" {
-			addH++ // the validation hint or error line
-		}
-	}
-	if m.addChoose {
-		addH++
-	}
+	addH := m.addHeight()
 
 	// Detail pane geometry feeds the plan: the overlay needs its content
 	// height up front, the side pane is sized by planScreen itself.
@@ -222,22 +214,43 @@ func (m Model) headerBar(width int) string {
 	return clip(left+" "+root+strings.Repeat(" ", maxInt(0, gap))+right, width, th.g.Ellipsis)
 }
 
+// addHeight is the vertical room the add flow's lines want right now: the
+// input line, its validation hint (once there is something to validate) and
+// the target-flavor prompt.
+func (m Model) addHeight() int {
+	addH := 0
+	if m.addInput {
+		addH = 1
+		if m.addText != "" {
+			addH++ // the validation hint or error line
+		}
+	}
+	if m.addChoose {
+		addH++
+	}
+	return addH
+}
+
 // detailContent renders the selected addon's detail: every table value at
-// full length (truncated cells reveal it here), plus source, tracking, the
-// last sync's error and plan reason and the owned directories.
+// full length (truncated cells reveal it here), the plain-language TOC
+// verdict, the owned directories and the source URL in full (selectable in
+// the terminal), the last sync's error and plan reason, and the installed
+// version's changelog — sanitized and clamped so upstream text cannot
+// corrupt the pane (R7).
 func (m Model) detailContent(a *service.AddonRow, width int) []string {
 	th := m.theme
 	if a == nil {
 		return []string{th.dim.Render("no addon selected")}
 	}
 	word := m.statusText(*a)
+	class := classifyStatus(word)
 	fields := []detailField{
 		{label: "Source", value: sourceText(a), style: th.dim},
 		{label: "Tracking", value: dash(a.Tracking), style: th.dim},
 		{label: "Strategy", value: service.StrategyLabel(state.Strategy(a.Strategy)), style: th.dim},
 		{label: "Installed", value: dash(a.Installed), style: th.dim},
 		{label: "Upstream", value: dash(a.Upstream), style: th.dim},
-		{label: "Status", value: th.statusGlyph(classifyStatus(word)) + " " + word, style: th.statusStyle(classifyStatus(word))},
+		{label: "Status", value: th.statusGlyph(class) + " " + m.plainStatus(*a, word), style: th.statusStyle(class)},
 	}
 	if len(a.Dirs) > 0 {
 		fields = append(fields, detailField{label: "Dirs", value: strings.Join(a.Dirs, ", "), style: th.dim})
@@ -256,7 +269,13 @@ func (m Model) detailContent(a *service.AddonRow, width int) []string {
 		lines = append(lines, th.accent.Render(line))
 	}
 	lines = append(lines, "")
-	return append(lines, renderFields(fields, width, th)...)
+	lines = append(lines, renderFields(fields, width, th)...)
+	if notes := changelogText(a.Changelog, th.g.Ellipsis); notes != "" {
+		lines = append(lines, "")
+		lines = append(lines, th.title.Render("Changelog"))
+		lines = append(lines, wrapText(notes, width)...)
+	}
+	return lines
 }
 
 // detailField is one label/value pair in the detail pane.
@@ -290,7 +309,7 @@ func renderFields(fields []detailField, width int, th theme) []string {
 // detailBlock renders the persistent side detail pane: a vertical rule and
 // the selected addon's full values beside the table.
 func (m Model) detailBlock(a *service.AddonRow, contentW, height int) string {
-	lines := fitLines(m.detailContent(a, contentW), height, m.theme.g.Ellipsis)
+	lines := fitLines(m.detailContent(a, contentW), m.detailScroll, height, m.theme.g.Ellipsis)
 	block := make([]string, 0, height)
 	for i := 0; i < height; i++ {
 		line := ""
@@ -311,7 +330,7 @@ func (m Model) detailOverlay(a *service.AddonRow, plan screenPlan) string {
 	if inner < 1 {
 		return fitBlock(th.dim.Render("no room for the detail pane"), plan.width, maxInt(1, plan.overlayH))
 	}
-	lines := fitLines(m.detailContent(a, contentW), inner, th.g.Ellipsis)
+	lines := fitLines(m.detailContent(a, contentW), m.detailScroll, inner, th.g.Ellipsis)
 	top := th.box.TopLeft + strings.Repeat(th.box.Top, contentW+2) + th.box.TopRight
 	bottom := th.box.BottomLeft + strings.Repeat(th.box.Bottom, contentW+2) + th.box.BottomRight
 	block := []string{top}
@@ -320,6 +339,31 @@ func (m Model) detailOverlay(a *service.AddonRow, plan screenPlan) string {
 	}
 	block = append(block, bottom)
 	return strings.Join(block, "\n")
+}
+
+// detailViewport reports the detail pane's scroll geometry at the current
+// size: the selected addon's content lines and how many of them the pane
+// shows at once. The scroll keys clamp against it and the page keys step
+// it; render() plans the same geometry through planScreen.
+func (m Model) detailViewport() (lines []string, visible int) {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	a := m.selected()
+	contentW := maxInt(8, w-4)
+	need := 0
+	if m.detail {
+		need = len(m.detailContent(a, contentW)) + 2 // border rows
+	}
+	plan := planScreen(w, h, m.detail, m.filtering || m.filter != "", m.wait != "", m.addHeight(), need)
+	if plan.side {
+		return m.detailContent(a, plan.detailW), plan.tableH
+	}
+	return m.detailContent(a, contentW), plan.overlayH - 2
 }
 
 // filterLine renders the active filter input line.
@@ -447,9 +491,12 @@ func joinBlocks(left, right string) string {
 	return strings.Join(l, "\n")
 }
 
-// fitLines clips a detail pane's lines to h rows, marking the cut with the
-// ellipsis so the squeeze is visible.
-func fitLines(lines []string, h int, ellipsis string) []string {
+// fitLines clips a detail pane's lines to h rows at the scroll offset,
+// marking the cut with the ellipsis so the squeeze is visible. The offset
+// clamps to the last full page, so the pane can never scroll past the end
+// of the content (R7).
+func fitLines(lines []string, scroll, h int, ellipsis string) []string {
+	lines = lines[clampInt(scroll, 0, maxInt(0, len(lines)-h)):]
 	if len(lines) <= h {
 		return lines
 	}
@@ -468,13 +515,90 @@ func dash(s string) string {
 	return s
 }
 
-// sourceText renders the addon's source for the detail pane.
+// sourceText renders the addon's source for the detail pane: the full URL
+// when the service layer recorded one, so it can be selected and copied
+// straight from the terminal.
 func sourceText(a *service.AddonRow) string {
 	src := dash(a.Source)
 	if a.SourceKind != "" {
 		src += " (" + a.SourceKind + ")"
 	}
 	return src
+}
+
+// plainStatus expands the bare TOC verdict jargon into the plain-language
+// line the detail pane shows ("matches Forever 1.60.1", "built for 110002
+// — may be outdated"). A live run's or a sync outcome's status word is
+// already plain and passes through unchanged.
+func (m Model) plainStatus(a service.AddonRow, word string) string {
+	switch word {
+	case "Match":
+		return "matches " + m.clientLabel()
+	case "MultiMatch":
+		if len(a.BuiltFor) > 1 {
+			return "matches " + m.clientLabel() + " (built for several versions)"
+		}
+		return "matches " + m.clientLabel()
+	case "Mismatch":
+		built := "an unknown interface"
+		if len(a.BuiltFor) > 0 {
+			built = joinInts(a.BuiltFor)
+		}
+		return "built for " + built + " " + m.theme.g.Dash + " may be outdated"
+	case "NoToc":
+		return "ships no .toc file"
+	case "Missing":
+		return "installed folder missing"
+	case "Unknown":
+		return "compatibility not checked"
+	}
+	return word
+}
+
+// clientLabel names the detected client the verdict is measured against:
+// the flavor display name and the short game version — "Forever 1.60.1".
+func (m Model) clientLabel() string {
+	if label := strings.TrimSpace(m.client.FlavorName + " " + m.client.Version); label != "" {
+		return label
+	}
+	return "the active client"
+}
+
+// joinInts renders interface numbers as one comma-separated list.
+func joinInts(nums []int) string {
+	parts := make([]string, len(nums))
+	for i, n := range nums {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// maxChangelogRunes clamps an upstream changelog before it reaches the
+// detail pane (R7): a huge release note cannot flood the pane — the cut is
+// visible and the pane scrolls over the rest harmlessly.
+const maxChangelogRunes = 2000
+
+// changelogText prepares an upstream changelog for the detail pane (R7):
+// line endings normalize to "\n", every other control byte is stripped —
+// the sanitizeProgressText pattern, so unprintable upstream text can never
+// smuggle an ANSI escape or a stray control rune into the pane — and the
+// length is clamped with a visible cut marker.
+func changelogText(s, ellipsis string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n':
+			return r
+		case r < 0x20 || r == 0x7f:
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(s)
+	if runes := []rune(s); len(runes) > maxChangelogRunes {
+		s = strings.TrimSpace(string(runes[:maxChangelogRunes])) + ellipsis
+	}
+	return s
 }
 
 // plural renders count with its noun, pluralized the English way for the
