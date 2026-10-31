@@ -136,10 +136,10 @@ func TestCmpNaturalOrdersVersionsNumerically(t *testing.T) {
 
 func TestCmpUpstreamSortsAbsentVersionsLast(t *testing.T) {
 	for _, absent := range []string{"-", ""} {
-		if c := cmpUpstream("1.0", absent); c <= 0 {
+		if c := cmpUpstream("1.0", absent); c >= 0 {
 			t.Errorf("cmpUpstream(%q, %q) = %d, want a version before an absent one", "1.0", absent, c)
 		}
-		if c := cmpUpstream(absent, "1.0"); c >= 0 {
+		if c := cmpUpstream(absent, "1.0"); c <= 0 {
 			t.Errorf("cmpUpstream(%q, %q) = %d, want an absent version after a version", absent, "1.0", c)
 		}
 	}

@@ -112,10 +112,14 @@ func statusRank(c statusClass) int {
 }
 
 // cmpUpstream orders two upstream version strings for the upstream sort:
-// absent versions ("-" or empty) sort last, the rest naturally.
+// absent versions ("-" or empty) sort last and compare equal to each
+// other, the rest naturally.
 func cmpUpstream(a, b string) int {
 	da, db := versionAbsent(a), versionAbsent(b)
-	if da != db {
+	if da || db {
+		if da && db {
+			return 0
+		}
 		if da {
 			return 1
 		}
