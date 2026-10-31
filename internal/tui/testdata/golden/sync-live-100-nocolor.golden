@@ -1,0 +1,28 @@
+[1mForever[m [1m1.60.1[m · [2m/games/World of Warcraft/_forever_[m                         [2mchecked 15:04[m · 5 addons
+[1mAddon                            [m[1mInstalled[m[1mUpstream [m[1mStrategy   [m[1mStatus                      [m          
+ [1mDeadlyBossMods[m                     [1m12.1.17[m    [1m12.1.17[m    [1mGH-Release[m   [1;2m⣽ resolving[m                  
+ auctionator                        341        342        GH-Release   [2m⣽ downloading: rate limited…[m 
+ rarescanner                        1.60.1.b1  1.60.1.b2  Direct       ✓ updated 1.60.1.b1 → 1.60.… 
+ WeakAuras                          5.19.5     5.19.5     Git-Pkgmeta  ✗ failed: cannot resolve ow… 
+ Details-Damage-Meter               d1e8ad72   -          Direct       ✓ updated d1e8ad72 → f00ba4… 
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+rate limited, retry after 5m
+⣽ syncing 2/5 · 1 done · 1 failed
+[1mu[m [2mupdate all[m[2m · [m[1ma[m [2madd[m[2m · [m[1mU[m [2mupdate one[m[2m · [m[1mc[m [2mcheck[m[2m · [m[1mr[m [2mrefresh[m[2m · [m[1ms[m [2mrelease/branch[m[2m · [m[1md[m [2mdelete[m[2m · [m[1mq[m [2mquit[m
