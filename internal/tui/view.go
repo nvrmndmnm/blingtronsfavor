@@ -36,6 +36,12 @@ func (m Model) render() string {
 		h = 24
 	}
 
+	// The help overlay is a screen of its own: every keybinding grouped by
+	// context, closable with ? or esc.
+	if m.helpOpen {
+		return fitBlock(m.helpScreen(w, h), w, h)
+	}
+
 	if len(m.status.Clients) == 0 {
 		lines := []string{
 			m.headerBar(w),
@@ -396,11 +402,16 @@ func (m Model) waitLine(width int) string {
 	return m.theme.warn.Render(clip(m.wait, width, m.theme.g.Ellipsis))
 }
 
-// statusBar renders the status zone: the run frame beside the spinner
-// while a sync or add runs — how far the run has come and how it is going
-// — then the current message. It occupies exactly one line of its own.
+// statusBar renders the status zone: the pending quit confirmation while
+// one is up — it states what quitting does to the in-flight install — then
+// the run frame beside the spinner while a sync or add runs: how far the
+// run has come and how it is going. It occupies exactly one line of its
+// own.
 func (m Model) statusBar(width int) string {
 	th := m.theme
+	if m.quitAsk != "" {
+		return th.warn.Render(clip(m.quitAsk, width, th.g.Ellipsis))
+	}
 	line := m.statusLine
 	if m.syncing || m.adding {
 		line = strings.TrimRight(m.spin.View(), " ") + " " + m.runFrame()
@@ -420,8 +431,9 @@ func (s helpSubset) FullHelp() [][]key.Binding { return nil }
 
 // helpBar renders the help zone: the compact key help on its own line,
 // styled apart from the status bar above it. When the full compact list is
-// too wide, entries drop off from the end (keeping the quit key), so the
-// bar always fits and "q quit" is always visible.
+// too wide, entries drop off before the pinned tail (the help and quit
+// keys), so the bar always fits and "? help" and "q quit" are always
+// visible.
 func (m Model) helpBar(width int) string {
 	items := m.keys.ShortHelp()
 	for {
@@ -429,9 +441,101 @@ func (m Model) helpBar(width int) string {
 		if lipgloss.Width(line) <= width || len(items) <= 2 {
 			return clip(line, width, m.theme.g.Ellipsis)
 		}
-		// Drop the second-to-last entry: the quit key is never dropped.
-		items = append(items[:len(items)-2], items[len(items)-1])
+		// Drop the last entry before the pinned help and quit keys.
+		items = append(items[:len(items)-3], items[len(items)-2:]...)
 	}
+}
+
+// helpScreen renders the full help overlay: every keybinding grouped by
+// the context it is active in (keys.helpSections), in a bordered box that
+// fills the terminal. The closing keys live in the box title, so the
+// content never competes with them for the last line, and the section
+// separators are dropped before any key is squeezed off screen.
+func (m Model) helpScreen(width, height int) string {
+	th := m.theme
+	contentW := maxInt(8, width-4)
+	inner := height - 2 // the border rows
+	if inner < 1 {
+		return fitBlock(th.dim.Render("no room for the help overlay"), width, maxInt(1, height))
+	}
+	var rows []string
+	for i, sec := range m.keys.helpSections() {
+		if i > 0 {
+			rows = append(rows, "")
+		}
+		rows = append(rows, th.title.Render(sec.title))
+		rows = append(rows, wrapHelpRows(sec.rows, contentW, th)...)
+	}
+	rows = fitHelpRows(rows, inner, th.g.Ellipsis)
+
+	title := " help " + th.g.Dash + " ? or esc closes "
+	top := th.box.TopLeft + th.box.Top + title +
+		strings.Repeat(th.box.Top, maxInt(0, contentW+1-lipgloss.Width(title))) + th.box.TopRight
+	bottom := th.box.BottomLeft + strings.Repeat(th.box.Bottom, contentW+2) + th.box.BottomRight
+	block := []string{top}
+	for _, line := range rows {
+		block = append(block, th.box.Left+" "+padLine(clip(line, contentW, ""), contentW)+" "+th.box.Right)
+	}
+	block = append(block, bottom)
+	return strings.Join(block, "\n")
+}
+
+// wrapHelpRows renders help rows as "key desc" items and wraps them to
+// width, so the overlay fits narrow terminals without dropping keys.
+func wrapHelpRows(rows []helpRow, width int, th theme) []string {
+	items := make([]string, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, th.title.Render(r.key)+" "+th.dim.Render(r.desc))
+	}
+	sep := th.dim.Render(" " + th.g.MidDot + " ")
+	return wrapItems(items, sep, width)
+}
+
+// wrapItems packs items onto lines of at most width cells, joining the
+// items sharing a line with sep. An item wider than a line gets a line of
+// its own — it is clipped later, never split.
+func wrapItems(items []string, sep string, width int) []string {
+	sepW := lipgloss.Width(sep)
+	var lines []string
+	line := ""
+	lineW := 0
+	for _, item := range items {
+		w := lipgloss.Width(item)
+		switch {
+		case line == "":
+			line, lineW = item, w
+		case lineW+sepW+w <= width:
+			line += sep + item
+			lineW += sepW + w
+		default:
+			lines = append(lines, line)
+			line, lineW = item, w
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// fitHelpRows fits the overlay content into h rows: when it overflows, the
+// blank section separators go first and only then does the squeeze mark
+// rows off the end, so every key stays visible as long as possible.
+func fitHelpRows(rows []string, h int, ellipsis string) []string {
+	if len(rows) > h {
+		compacted := make([]string, 0, len(rows))
+		for _, r := range rows {
+			if r != "" {
+				compacted = append(compacted, r)
+			}
+		}
+		rows = compacted
+	}
+	rows = fitLines(rows, h, ellipsis)
+	for len(rows) < h {
+		rows = append(rows, "")
+	}
+	return rows
 }
 
 // joinBlocks concatenates two blocks line by line. Both are pre-fitted to

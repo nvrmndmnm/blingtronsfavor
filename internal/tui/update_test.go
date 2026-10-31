@@ -58,6 +58,16 @@ func keyMsg(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code, Text: string(code)}
 }
 
+// escKey builds the esc press.
+func escKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEsc}
+}
+
+// ctrlCKey builds the ctrl+c press.
+func ctrlCKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+}
+
 // press sends one key through Update and returns the resulting model.
 func press(t *testing.T, m Model, msg tea.KeyPressMsg) Model {
 	t.Helper()
@@ -126,26 +136,119 @@ func TestQuitKeyQuits(t *testing.T) {
 	}
 }
 
-func TestCancelOrQuitCancelsSyncFirst(t *testing.T) {
+func TestQuitMidSyncAsksFirstAndStatesRollback(t *testing.T) {
 	m := testModel(t)
 	cancelled := false
 	m.syncing = true
 	m.cancelSync = func() { cancelled = true }
 
-	next, _ := m.cancelOrQuit()
-	m = next.(Model)
-	if !cancelled {
-		t.Fatal("quit key did not cancel the running sync")
+	m = press(t, m, keyMsg('q'))
+	if cancelled {
+		t.Fatal("q cancelled the running sync without asking")
 	}
 	if m.quitting {
-		t.Fatal("quit key quit while a sync was still rolling back")
+		t.Fatal("q quit while a sync was in flight")
+	}
+	if !strings.Contains(m.quitAsk, "rolls back") {
+		t.Fatalf("quitAsk = %q, want the rollback stated", m.quitAsk)
 	}
 
-	m.syncing = false
-	next, _ = m.cancelOrQuit()
-	m = next.(Model)
+	// esc withdraws the question and leaves the sync running.
+	m = press(t, m, escKey())
+	if m.quitAsk != "" || cancelled {
+		t.Fatal("esc did not withdraw the quit question cleanly")
+	}
+
+	// Asking again and confirming quits — and only then rolls the sync back.
+	m = press(t, m, keyMsg('q'))
+	m = press(t, m, keyMsg('y'))
+	if !cancelled {
+		t.Fatal("y did not cancel the sync to roll the in-flight install back")
+	}
 	if !m.quitting {
-		t.Fatal("quit key did not quit once no sync was running")
+		t.Fatal("y did not quit after the confirmation")
+	}
+}
+
+func TestCtrlCMidSyncCancelsThenOffersQuit(t *testing.T) {
+	m := testModel(t)
+	cancelled := false
+	m.syncing = true
+	m.cancelSync = func() { cancelled = true }
+
+	m = press(t, m, ctrlCKey())
+	if !cancelled {
+		t.Fatal("ctrl+c did not cancel the running sync")
+	}
+	if m.quitting {
+		t.Fatal("ctrl+c quit without offering")
+	}
+	if !strings.Contains(m.quitAsk, "rolls back") {
+		t.Fatalf("quitAsk = %q, want the rollback stated", m.quitAsk)
+	}
+
+	m = press(t, m, keyMsg('y'))
+	if !m.quitting {
+		t.Fatal("y did not accept the quit offer")
+	}
+}
+
+func TestCtrlCWhileIdleQuits(t *testing.T) {
+	m := testModel(t)
+	m = press(t, m, ctrlCKey())
+	if !m.quitting {
+		t.Fatal("ctrl+c while idle did not quit")
+	}
+}
+
+func TestHelpKeyOpensAndClosesOverlay(t *testing.T) {
+	m := testModel(t)
+	m = press(t, m, keyMsg('?'))
+	if !m.helpOpen {
+		t.Fatal("? did not open the help overlay")
+	}
+	m = press(t, m, keyMsg('?'))
+	if m.helpOpen {
+		t.Fatal("? did not close the help overlay")
+	}
+	m = press(t, m, keyMsg('?'))
+	m = press(t, m, escKey())
+	if m.helpOpen {
+		t.Fatal("esc did not close the help overlay")
+	}
+}
+
+func TestHelpOverlayHandsQuitToTheQuitKeys(t *testing.T) {
+	// Idle, q quits straight from the overlay.
+	m := testModel(t)
+	m = press(t, m, keyMsg('?'))
+	m = press(t, m, keyMsg('q'))
+	if !m.quitting || m.helpOpen {
+		t.Fatalf("q in the help overlay: quitting=%v helpOpen=%v", m.quitting, m.helpOpen)
+	}
+
+	// Mid-sync, q closes the overlay and asks first — the question has to
+	// be visible on the normal screen.
+	m = testModel(t)
+	cancelled := false
+	m.syncing = true
+	m.cancelSync = func() { cancelled = true }
+	m = press(t, m, keyMsg('?'))
+	m = press(t, m, keyMsg('q'))
+	if m.helpOpen || m.quitAsk == "" || cancelled || m.quitting {
+		t.Fatalf("q over the help mid-sync: helpOpen=%v quitAsk=%q cancelled=%v quitting=%v",
+			m.helpOpen, m.quitAsk, cancelled, m.quitting)
+	}
+}
+
+func TestTrackKeyStillToggles(t *testing.T) {
+	m := testModel(t)
+	next, cmd := m.Update(keyMsg('s'))
+	if cmd == nil {
+		t.Fatal("s did not route to the tracking toggle")
+	}
+	if n := next.(Model); n.confirm || n.quitAsk != "" || n.helpOpen || n.filtering {
+		t.Fatal("s opened a mode instead of toggling tracking")
 	}
 }
 

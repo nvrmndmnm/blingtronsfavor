@@ -149,11 +149,17 @@ add an addon
 detail pane toggle,
 .Ar /
 filter,
+.Ar ?
+full help overlay
+.Pq every key grouped by context; closed with ? or esc ,
 .Ar q
-quit.
-A running update is cancelled
+quit
+.Pq asks for confirmation while a sync or add is in flight, stating that quitting rolls back the in-flight install ,
+.Ar ctrl+c
+cancel the running sync
 .Pq with rollback
-before quit; an add flow is cancelled with
+and then offer quit.
+An add flow is cancelled with
 .Ar esc .
 .Fl -ascii
 degrades every glyph, border and separator to plain ASCII on

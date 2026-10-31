@@ -97,6 +97,8 @@ type Model struct {
 	filtering     bool               // "/" filter input active
 	filter        string             // case-insensitive name filter
 	confirm       bool               // delete confirmation pending
+	quitAsk       string             // quit confirmation pending: its question, "" when none
+	helpOpen      bool               // full-screen help overlay (?) open
 	addInput      bool               // "a" add input active
 	addText       string             // the reference being typed
 	addParsed     service.AddRef     // live parse of addText
