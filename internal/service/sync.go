@@ -20,6 +20,9 @@ import (
 type SyncOptions struct {
 	// CheckOnly resolves and reports only: no downloads, no installs.
 	CheckOnly bool
+	// Only, when non-nil, restricts the run to the one named unit — the
+	// TUI's "update selected addon" — instead of every managed addon.
+	Only *Unit
 }
 
 // defaultSyncWorkers is how many addons a Sync run works on at once. The
@@ -80,7 +83,9 @@ func (r Report) Summary() string {
 }
 
 // Sync resolves every managed addon against its upstream and — unless
-// CheckOnly is set — installs the available updates atomically. It never
+// CheckOnly is set — installs the available updates atomically. With
+// opts.Only set it works on just that one unit instead of every managed
+// addon. It never
 // prompts: it either succeeds or reports per-addon failures, so a launch
 // script can rely on the caller's exit-code mapping. Units of work run
 // concurrently (defaultSyncWorkers at a time) in the deterministic task
@@ -108,6 +113,9 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result), onProgre
 		return Report{}, fmt.Errorf("create github client: %w", err)
 	}
 	tasks := collectTasks(st)
+	if opts.Only != nil {
+		tasks = filterTasks(tasks, *opts.Only)
+	}
 	sink := newProgressSink(onProgress)
 
 	// The worker pool runs whole units concurrently; ready[i] is closed
@@ -329,6 +337,19 @@ func collectTasks(st *state.State) []syncTask {
 		}
 	}
 	return tasks
+}
+
+// filterTasks restricts a run to the tasks the unit names (same flavor and
+// addon id) — the "update selected addon" scope. A unit that names nothing
+// in the workload yields an empty run.
+func filterTasks(tasks []syncTask, unit Unit) []syncTask {
+	var out []syncTask
+	for _, t := range tasks {
+		if t.flavor == unit.Flavor && t.addon.ID == unit.AddonID {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // resolveOne resolves a single task against its upstream — the unit of work

@@ -117,13 +117,19 @@ func (m Model) render() string {
 	return b.String()
 }
 
-// header renders the flavor badge — "Forever 1.60.1" — and the client root.
+// header renders the flavor badge — "Forever 1.60.1" — the client root and
+// the checked stamp ("checked 14:32"), which updates after each refresh or
+// sync.
 func (m Model) header() string {
 	badge := m.client.FlavorName
 	if m.client.Version != "" {
 		badge += " " + m.client.Version
 	}
-	return badge + "  " + dimStyle.Render(m.client.Root)
+	h := badge + "  " + dimStyle.Render(m.client.Root)
+	if !m.checkedAt.IsZero() {
+		h += "  " + dimStyle.Render("checked "+m.checkedAt.Format("15:04"))
+	}
+	return h
 }
 
 // detailPane renders the selected addon's detail: source, tracking, the
