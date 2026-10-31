@@ -75,9 +75,12 @@ func (m Model) render() string {
 		plain = append(plain, cells)
 		classes = append(classes, class)
 	}
-	widths := columnWidths(tableAvail(plan.tableW, len(columnSpecs)), columnSpecs, naturalWidths(columnSpecs, plain))
-	cols := make([]table.Column, len(columnSpecs))
-	for i, spec := range columnSpecs {
+	// The active sort column's header carries the sort mark (sortSpecs
+	// prefixes it and feeds the width planning, so it never clips).
+	specs := m.sortSpecs()
+	widths := columnWidths(tableAvail(plan.tableW, len(specs)), specs, naturalWidths(specs, plain))
+	cols := make([]table.Column, len(specs))
+	for i, spec := range specs {
 		cols[i] = table.Column{Title: spec.title, Width: widths[i]}
 	}
 	m.table.SetColumns(cols)
@@ -86,6 +89,11 @@ func (m Model) render() string {
 	m.table.SetWidth(plan.tableW)
 
 	body := fitBlock(m.table.View(), plan.tableW, plan.tableH)
+	if m.filter != "" && len(m.rows) == 0 {
+		// Zero matches shows the empty state in place of the grid: it
+		// names the filter and suggests clearing it.
+		body = fitBlock(m.filterEmptyState(), plan.tableW, plan.tableH)
+	}
 	if plan.side {
 		body = joinBlocks(body, m.detailBlock(a, plan.detailW, plan.tableH))
 	}
@@ -366,14 +374,28 @@ func (m Model) detailViewport() (lines []string, visible int) {
 	return m.detailContent(a, contentW), plan.overlayH - 2
 }
 
-// filterLine renders the active filter input line.
+// filterLine renders the active filter: the text being typed or applied
+// with the input cursor while typing, and the match count beside it
+// ("filter: dbm — 2 of 12") so the filter's state and reach are always
+// visible while one is active.
 func (m Model) filterLine(width int) string {
 	th := m.theme
-	line := th.dim.Render("filter: ") + m.filter
+	line := th.dim.Render("filter: ") + clean(m.filter)
 	if m.filtering {
 		line += th.accent.Render(th.g.Cursor)
 	}
+	match, total := m.filterCounts()
+	line += fmt.Sprintf(" %s %d of %d", th.g.Dash, match, total)
 	return clip(line, width, th.g.Ellipsis)
+}
+
+// filterEmptyState renders the zero-match state in place of the grid: it
+// names the filter that matched nothing and suggests clearing it (esc),
+// instead of leaving a blank table.
+func (m Model) filterEmptyState() string {
+	th := m.theme
+	return th.title.Render(fmt.Sprintf("no addons match \"%s\"", clean(m.filter))) + "\n" +
+		th.dim.Render("press esc to clear the filter")
 }
 
 // addLine renders the add input line: the reference being typed with the

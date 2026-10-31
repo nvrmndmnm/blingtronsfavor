@@ -255,6 +255,20 @@ func TestDetailPaneCompletesTheStory(t *testing.T) {
 	}
 }
 
+func TestFilterLineShowsFilterAndCount(t *testing.T) {
+	m := viewTest(t, caps{unicode: true, color: true}, 100, 28, viewRows())
+	m.filter = "owner"
+	m.refreshRows()
+	content := m.View().Content
+	// The filter line always carries the active filter and the match
+	// count: 4 of the 5 fixture rows have an owner/… source.
+	for _, want := range []string{"filter: ", "owner — 4 of 5"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("filter line is missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestPlainStatusReplacesVerdictJargon(t *testing.T) {
 	m := viewTest(t, caps{unicode: true, color: true}, 100, 28, nil)
 	m.client.Version = "1.60.1"
@@ -329,5 +343,22 @@ func TestHugeUnprintableChangelogNeverCorruptsLayout(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestZeroMatchesShowsEmptyState(t *testing.T) {
+	m := viewTest(t, caps{unicode: true, color: true}, 100, 28, viewRows())
+	m.filter = "zzz"
+	m.refreshRows()
+	content := m.View().Content
+	// The empty state names the filter, suggests clearing it and keeps
+	// the count visible — not a blank grid.
+	for _, want := range []string{`no addons match "zzz"`, "press esc to clear the filter", "0 of 5"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("zero-match frame is missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "rarescanner") {
+		t.Fatalf("zero-match frame still shows the grid:\n%s", content)
 	}
 }

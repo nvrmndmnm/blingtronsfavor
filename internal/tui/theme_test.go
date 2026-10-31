@@ -53,7 +53,7 @@ func TestASCIIGlyphsAreASCII(t *testing.T) {
 	for _, s := range []string{
 		asciiGlyphs.Check, asciiGlyphs.Warn, asciiGlyphs.Cross, asciiGlyphs.Pending,
 		asciiGlyphs.Arrow, asciiGlyphs.Ellipsis, asciiGlyphs.Dash, asciiGlyphs.MidDot,
-		asciiGlyphs.Cursor, asciiGlyphs.Up, asciiGlyphs.Down,
+		asciiGlyphs.Cursor, asciiGlyphs.Sort, asciiGlyphs.Up, asciiGlyphs.Down,
 	} {
 		for _, r := range s {
 			if r > 127 {

@@ -8,7 +8,7 @@ import (
 //
 //	u update all · a add · U update one · c check · r refresh ·
 //	s toggle release/branch · d delete (confirm) ·
-//	enter detail pane · / filter · q quit
+//	enter detail pane · / filter (esc clears) · o sort · q quit
 //
 // It also satisfies bubbles' help.KeyMap so the bottom bar can render it.
 type keyMap struct {
@@ -18,6 +18,7 @@ type keyMap struct {
 	PgDn      key.Binding
 	Detail    key.Binding
 	Filter    key.Binding
+	Sort      key.Binding
 	Update    key.Binding
 	Add       key.Binding
 	UpdateOne key.Binding
@@ -38,6 +39,7 @@ func newKeyMap(g glyphs) keyMap {
 		PgDn:      key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", "page down")),
 		Detail:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Sort:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
 		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
 		Add:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		UpdateOne: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update one")),
@@ -53,14 +55,14 @@ func newKeyMap(g glyphs) keyMap {
 
 // ShortHelp renders the compact bottom help bar.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
+	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Sort, k.Quit}
 }
 
 // FullHelp renders the two-row help page: navigation plus the detail
 // pane's scroll keys.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.PgUp, k.PgDn, k.Detail, k.Filter},
+		{k.Up, k.Down, k.PgUp, k.PgDn, k.Detail, k.Filter, k.Sort},
 		{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Quit},
 	}
 }

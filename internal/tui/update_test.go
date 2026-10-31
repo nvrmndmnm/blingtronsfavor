@@ -89,6 +89,46 @@ func TestFilterModeCapturesKeys(t *testing.T) {
 	}
 }
 
+func TestFilterMatchesNameAndSource(t *testing.T) {
+	m := testModel(t)
+	m = press(t, m, keyMsg('/'))
+	for _, r := range "owner/rep" {
+		m = press(t, m, keyMsg(r))
+	}
+	// The filter matches DemoAddon through its source only — its name
+	// does not contain "owner/rep".
+	if len(m.rows) != 1 || m.rows[0].ID != "DemoAddon" {
+		t.Fatalf("rows = %+v, want only DemoAddon (matched through its source)", m.rows)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = press(t, m, keyMsg('/'))
+	for _, r := range "github" {
+		m = press(t, m, keyMsg(r))
+	}
+	// The source kind matches every github-sourced addon.
+	if len(m.rows) != 2 {
+		t.Fatalf("rows = %+v, want both addons (matched through their source kind)", m.rows)
+	}
+}
+
+func TestEscClearsAppliedFilter(t *testing.T) {
+	m := testModel(t)
+	m = press(t, m, keyMsg('/'))
+	for _, r := range "demo" {
+		m = press(t, m, keyMsg(r))
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // applies
+	if m.filtering || m.filter != "demo" || len(m.rows) != 1 {
+		t.Fatalf("enter did not apply the filter (filtering=%v filter=%q rows=%d)", m.filtering, m.filter, len(m.rows))
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.filter != "" || len(m.rows) != 2 {
+		t.Fatalf("esc did not return to the full list (filter=%q rows=%d)", m.filter, len(m.rows))
+	}
+}
+
 func TestDeleteConfirmFlow(t *testing.T) {
 	m := testModel(t)
 	m = press(t, m, keyMsg('d'))

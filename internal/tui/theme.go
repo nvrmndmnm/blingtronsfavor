@@ -56,6 +56,7 @@ type glyphs struct {
 	Dash     string // prose dashes
 	MidDot   string // separator ("·" / "|")
 	Cursor   string // filter input cursor
+	Sort     string // active sort column marker
 	Up       string // help label for the up key
 	Down     string // help label for the down key
 }
@@ -70,6 +71,7 @@ var unicodeGlyphs = glyphs{
 	Dash:     "—",
 	MidDot:   "·",
 	Cursor:   "▌",
+	Sort:     "▲",
 	Up:       "↑",
 	Down:     "↓",
 }
@@ -86,6 +88,7 @@ var asciiGlyphs = glyphs{
 	Dash:     "-",
 	MidDot:   "|",
 	Cursor:   "_",
+	Sort:     "^",
 	Up:       "up",
 	Down:     "down",
 }
