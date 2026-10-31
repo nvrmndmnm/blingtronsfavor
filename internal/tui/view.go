@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -158,8 +159,9 @@ func (m Model) plainCells(a service.AddonRow) ([]string, statusClass) {
 	}, class
 }
 
-// headerBar renders the styled header bar: flavor badge, game version and
-// client root on the left, the live addon counts on the right.
+// headerBar renders the styled header bar: flavor badge, game version,
+// client root and the checked stamp ("checked 14:32", updating after each
+// refresh or sync) on the left, the live addon counts on the right.
 func (m Model) headerBar(width int) string {
 	th := m.theme
 	left := th.accent.Render("bfctl")
@@ -170,13 +172,20 @@ func (m Model) headerBar(width int) string {
 		}
 	}
 	right := ""
+	if !m.checkedAt.IsZero() {
+		right = th.dim.Render("checked " + m.checkedAt.Format("15:04"))
+	}
 	if m.client.Flavor != "" {
 		total, updates := m.counts()
-		right = fmt.Sprintf("%d %s", total, plural(total, "addon"))
+		counts := fmt.Sprintf("%d %s", total, plural(total, "addon"))
 		if updates > 0 {
-			right += " " + th.g.MidDot + " " +
+			counts += " " + th.g.MidDot + " " +
 				th.warn.Render(fmt.Sprintf("%d %s available", updates, plural(updates, "update")))
 		}
+		if right != "" {
+			right += " " + th.g.MidDot + " "
+		}
+		right += counts
 	}
 
 	root := ""
@@ -185,7 +194,7 @@ func (m Model) headerBar(width int) string {
 		root = th.g.MidDot + " " + th.dim.Render(truncateMiddle(m.client.Root, room, th.g.Ellipsis)) + " "
 	}
 	gap := width - lipgloss.Width(left) - 1 - lipgloss.Width(root) - lipgloss.Width(right)
-	return clip(left+" "+root+strings.Repeat(" ", maxInt(1, gap))+right, width, th.g.Ellipsis)
+	return clip(left+" "+root+strings.Repeat(" ", maxInt(0, gap))+right, width, th.g.Ellipsis)
 }
 
 // detailContent renders the selected addon's detail: every table value at
@@ -319,10 +328,27 @@ func (m Model) statusBar(width int) string {
 	return clip(line, width, th.g.Ellipsis)
 }
 
+// helpSubset is a reduced key list for the compact help bar when the full
+// list is too wide for the terminal.
+type helpSubset []key.Binding
+
+func (s helpSubset) ShortHelp() []key.Binding  { return s }
+func (s helpSubset) FullHelp() [][]key.Binding { return nil }
+
 // helpBar renders the help zone: the compact key help on its own line,
-// styled apart from the status bar above it.
+// styled apart from the status bar above it. When the full compact list is
+// too wide, entries drop off from the end (keeping the quit key), so the
+// bar always fits and "q quit" is always visible.
 func (m Model) helpBar(width int) string {
-	return clip(m.help.View(m.keys), width, m.theme.g.Ellipsis)
+	items := m.keys.ShortHelp()
+	for {
+		line := m.help.View(helpSubset(items))
+		if lipgloss.Width(line) <= width || len(items) <= 2 {
+			return clip(line, width, m.theme.g.Ellipsis)
+		}
+		// Drop the second-to-last entry: the quit key is never dropped.
+		items = append(items[:len(items)-2], items[len(items)-1])
+	}
 }
 
 // joinBlocks concatenates two blocks line by line. Both are pre-fitted to

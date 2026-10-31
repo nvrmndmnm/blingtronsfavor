@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -18,10 +19,12 @@ type syncDoneMsg struct {
 	err    error
 }
 
-// statusMsg carries a refreshed status snapshot.
+// statusMsg carries a refreshed status snapshot. refreshed marks the
+// user's own refresh (the "r" key), so the status line can acknowledge it.
 type statusMsg struct {
-	status service.Status
-	err    error
+	status    service.Status
+	err       error
+	refreshed bool
 }
 
 // trackMsg is the outcome of a tracking toggle.
@@ -81,8 +84,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = msg.status
+		m.checkedAt = time.Now()
 		m.pickClient()
 		m.refreshRows()
+		if msg.refreshed {
+			m.statusLine = "refreshed " + m.theme.g.Dash + " checked " + m.checkedAt.Format("15:04")
+		}
 		return m, nil
 	case trackMsg:
 		if msg.err != nil {
@@ -163,7 +170,28 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusLine = "sync already running"
 			return m, nil
 		}
-		return m.startSync()
+		return m.startSync(service.SyncOptions{})
+	case key.Matches(msg, m.keys.Check):
+		if m.syncing {
+			m.statusLine = "sync already running"
+			return m, nil
+		}
+		return m.startSync(service.SyncOptions{CheckOnly: true})
+	case key.Matches(msg, m.keys.UpdateOne):
+		if m.syncing {
+			m.statusLine = "sync already running"
+			return m, nil
+		}
+		a := m.selected()
+		if a == nil {
+			m.statusLine = "no addon selected"
+			return m, nil
+		}
+		unit := service.Unit{Flavor: client.Flavor(m.client.Flavor), AddonID: a.ID}
+		return m.startSync(service.SyncOptions{Only: &unit})
+	case key.Matches(msg, m.keys.Refresh):
+		m.statusLine = "refreshing" + m.theme.g.Ellipsis
+		return m, refreshStatus()
 	case key.Matches(msg, m.keys.Track):
 		return m.doToggle()
 	case key.Matches(msg, m.keys.Delete):
@@ -200,11 +228,14 @@ func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
 // ProgressEvent stream and its result callback write the run state as the
 // work happens (no per-event messages), and the spinner tick samples it
 // into the addon rows and the status bar. The spinner keeps turning until
-// the run reports back.
-func (m Model) startSync() (tea.Model, tea.Cmd) {
+// the run reports back. opts scopes the run: the plain update-all ("u"),
+// the check-only preview ("c") or the selected addon only ("U") — every
+// run reports through the same live-row stream.
+func (m Model) startSync(opts service.SyncOptions) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.ctx)
 	run := newSyncRun()
 	m.syncing = true
+	m.checkOnly = opts.CheckOnly
 	m.cancelSync = cancel
 	m.run = run
 	m.live = liveState{}
@@ -214,7 +245,7 @@ func (m Model) startSync() (tea.Model, tea.Cmd) {
 	go func() {
 		defer m.rt.wg.Done()
 		defer cancel()
-		report, err := service.Sync(ctx, service.SyncOptions{}, run.recordResult, run.record)
+		report, err := m.syncFn(ctx, opts, run.recordResult, run.record)
 		m.rt.send(syncDoneMsg{report: report, err: err})
 	}()
 	var spinCmd tea.Cmd
@@ -226,6 +257,7 @@ func (m Model) startSync() (tea.Model, tea.Cmd) {
 // decided outcomes land in the results map — where the rows and the
 // detail pane keep them after the run — and the live rows are dropped.
 func (m *Model) finishSync() {
+	m.checkOnly = false
 	if m.run != nil {
 		m.live = m.run.sample()
 		m.run = nil
@@ -274,5 +306,15 @@ func loadStatus() tea.Cmd {
 	return func() tea.Msg {
 		st, err := service.LoadStatus()
 		return statusMsg{status: st, err: err}
+	}
+}
+
+// refreshStatus is loadStatus for the user's "r" key: the snapshot is
+// re-loaded — the same call the initial load makes — and the reply is
+// marked so the status line can acknowledge the refresh.
+func refreshStatus() tea.Cmd {
+	return func() tea.Msg {
+		st, err := service.LoadStatus()
+		return statusMsg{status: st, err: err, refreshed: true}
 	}
 }

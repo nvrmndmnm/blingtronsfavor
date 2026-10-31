@@ -371,3 +371,49 @@ func TestSyncSkippedProgress(t *testing.T) {
 		t.Errorf("frame = %+v, want the manual unit 1 of 1", ev)
 	}
 }
+
+// TestFilterTasksRestrictsRunToOneUnit checks the "update selected addon"
+// scope: only the tasks the unit names survive, and a unit that names
+// nothing in the workload yields an empty run.
+func TestFilterTasksRestrictsRunToOneUnit(t *testing.T) {
+	tasks := []syncTask{
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "Alpha"}},
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "Beta"}},
+		{flavor: client.FlavorClassic, addon: &state.AddonState{ID: "Alpha"}},
+	}
+	got := filterTasks(tasks, Unit{Flavor: client.FlavorForever, AddonID: "Alpha"})
+	if len(got) != 1 || got[0].flavor != client.FlavorForever || got[0].addon.ID != "Alpha" {
+		t.Fatalf("filterTasks = %+v, want just Forever/Alpha", got)
+	}
+	if all := filterTasks(tasks, Unit{}); len(all) != 0 {
+		t.Fatalf("filterTasks(zero unit) = %d tasks, want none", len(all))
+	}
+}
+
+// TestSyncOnlyRunsSelectedUnit drives Sync with Only set over two manual
+// entries: exactly the named unit runs (it skips, like any manual entry),
+// and its workload frame is 1 of 1 — the other addon is never touched.
+func TestSyncOnlyRunsSelectedUnit(t *testing.T) {
+	testState(t,
+		&state.AddonState{ID: "Alpha", Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: "Alpha"}},
+		&state.AddonState{ID: "Beta", Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: "Beta"}},
+	)
+	var got []ProgressEvent
+	rep, err := Sync(context.Background(), SyncOptions{Only: &Unit{Flavor: client.FlavorForever, AddonID: "Beta"}}, nil,
+		func(ev ProgressEvent) { got = append(got, ev) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if rep.Skipped != 1 || len(rep.Results) != 1 {
+		t.Fatalf("report = %+v, want exactly one skipped unit", rep)
+	}
+	if r := rep.Results[0]; r.AddonID != "Beta" {
+		t.Fatalf("result = %+v, want Beta", r)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events (%+v), want one terminal event", len(got), got)
+	}
+	if ev := got[0]; ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "Beta"}) || ev.Index != 1 || ev.Total != 1 {
+		t.Errorf("frame = %+v, want Beta 1 of 1", ev)
+	}
+}

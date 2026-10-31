@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
@@ -77,6 +78,10 @@ type Model struct {
 	ctx   context.Context
 	rt    *runtime
 	theme theme
+	// syncFn runs the service sync work; it is a field so tests can start
+	// runs and inspect their options without touching the network.
+	// Production always uses service.Sync.
+	syncFn func(context.Context, service.SyncOptions, func(service.Result), service.ProgressFunc) (service.Report, error)
 
 	status service.Status
 	client service.ClientRow
@@ -93,12 +98,14 @@ type Model struct {
 	filter     string // case-insensitive name filter
 	confirm    bool   // delete confirmation pending
 	syncing    bool   // a service.Sync is running
+	checkOnly  bool   // the running sync is the check-only preview ("c")
 	cancelSync context.CancelFunc
 	run        *syncRun  // the running sync's live state, nil when idle
 	live       liveState // last sample of the run state (rows, counters)
 	wait       string    // rate-limit wait line while one lasts
 	statusLine string
 	results    map[string]service.Result // last sync result per addon id
+	checkedAt  time.Time                 // when the snapshot was last loaded ("checked 14:32")
 	quitting   bool
 }
 
@@ -144,6 +151,7 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 		ctx:     ctx,
 		rt:      rt,
 		theme:   th,
+		syncFn:  service.Sync,
 		table:   tbl,
 		spin:    spin,
 		help:    helpBar,
@@ -153,6 +161,7 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	if st, err := service.LoadStatus(); err == nil {
 		m.status = st
 		m.statusLine = fmt.Sprintf("ready %s q quits, u updates all", th.g.Dash)
+		m.checkedAt = time.Now()
 	} else {
 		m.statusLine = "error: " + err.Error()
 	}
@@ -215,7 +224,10 @@ func (m *Model) statusText(a service.AddonRow) string {
 }
 
 // outcomeText renders one decided outcome in the CLI live block's words:
-// "up to date", "updated 12.1.17 → 12.1.18", "failed: <reason>".
+// "up to date", "updated 12.1.17 → 12.1.18", "failed: <reason>". A
+// check-only preview renders what would change — "update 12.1.17 →
+// 12.1.18" ("update → 12.1.18" with nothing installed) — and touches
+// nothing.
 func (m Model) outcomeText(r service.Result) string {
 	switch r.Kind {
 	case service.ResultUpdated:
@@ -226,7 +238,13 @@ func (m Model) outcomeText(r service.Result) string {
 	case service.ResultUpToDate:
 		return "up to date"
 	case service.ResultAvailable:
-		return "update " + r.To
+		switch r.From {
+		case "-":
+			return "update " + m.theme.g.Arrow + " " + r.To
+		case "":
+			return "update " + r.To
+		}
+		return "update " + r.From + " " + m.theme.g.Arrow + " " + r.To
 	case service.ResultSkipped:
 		return "manual"
 	case service.ResultFailed:
@@ -272,17 +290,22 @@ func (m Model) resultFor(id string) (service.Result, bool) {
 	return r, ok
 }
 
-// runFrame renders the sync run frame the status bar shows while a sync
-// runs: how far the run has come and how it is going — "syncing 2/4 · 1
-// done · 1 failed". The separators follow the glyph set like everything
-// else on screen.
+// runFrame renders the sync run frame the status bar shows while a run
+// goes: how far the run has come and how it is going — "syncing 2/4 · 1
+// done · 1 failed". The check-only preview ("c") frames itself as
+// "checking" — it resolves and reports, but installs nothing. The
+// separators follow the glyph set like everything else on screen.
 func (m Model) runFrame() string {
+	verb := "syncing"
+	if m.checkOnly {
+		verb = "checking"
+	}
 	sep := " " + m.theme.g.MidDot + " "
 	if m.live.total == 0 {
-		return "syncing" + m.theme.g.Ellipsis
+		return verb + m.theme.g.Ellipsis
 	}
-	s := fmt.Sprintf("syncing %d/%d%s%d done%s%d failed",
-		m.live.done+m.live.failed+m.live.skipped, m.live.total, sep, m.live.done, sep, m.live.failed)
+	s := fmt.Sprintf("%s %d/%d%s%d done%s%d failed",
+		verb, m.live.done+m.live.failed+m.live.skipped, m.live.total, sep, m.live.done, sep, m.live.failed)
 	if m.live.skipped > 0 {
 		s += fmt.Sprintf("%s%d skipped", sep, m.live.skipped)
 	}
