@@ -7,7 +7,7 @@ import "testing"
 
 func TestPlanScreenHoldsAtAcceptanceWidths(t *testing.T) {
 	for _, w := range []int{60, 80, 100, 120, 200} {
-		plan := planScreen(w, 28, false, false, false, 0)
+		plan := planScreen(w, 28, false, false, false, 0, 0)
 		if got, want := headerZoneH+plan.tableH+plan.overlayH+plan.filterH+statusZoneH+helpZoneH, 28; got != want {
 			t.Errorf("width %d: zones sum to %d lines, want %d", w, got, want)
 		}
@@ -30,7 +30,7 @@ func TestPlanScreenHoldsAtAcceptanceWidths(t *testing.T) {
 func TestPlanScreenReservesStatusAndHelpZones(t *testing.T) {
 	// With the filter line and the detail overlay both wanting room, the
 	// status and help bars still keep their own lines.
-	plan := planScreen(80, 24, true, true, false, 40)
+	plan := planScreen(80, 24, true, true, false, 0, 40)
 	if plan.filterH != 1 {
 		t.Fatalf("filterH = %d, want 1", plan.filterH)
 	}
@@ -49,7 +49,7 @@ func TestPlanScreenReservesStatusAndHelpZones(t *testing.T) {
 func TestPlanScreenOverlayGivesWayFirst(t *testing.T) {
 	// A short terminal keeps the table (at least one row) and both bars;
 	// the overlay shrinks to whatever space is left.
-	plan := planScreen(80, 6, true, false, false, 20)
+	plan := planScreen(80, 6, true, false, false, 0, 20)
 	if plan.overlayH != 2 {
 		t.Fatalf("overlayH = %d, want 2 (the space above the squeezed table)", plan.overlayH)
 	}

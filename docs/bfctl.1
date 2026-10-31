@@ -142,6 +142,9 @@ update all,
 toggle release/branch tracking,
 .Ar d
 delete with confirmation,
+.Ar a
+add an addon
+.Pq inline ref input, validated live; several configured clients ask for the target flavor ,
 .Ar enter
 detail pane toggle,
 .Ar /
@@ -150,7 +153,8 @@ filter,
 quit.
 A running update is cancelled
 .Pq with rollback
-before quit.
+before quit; an add flow is cancelled with
+.Ar esc .
 .Fl -ascii
 degrades every glyph, border and separator to plain ASCII on
 non-UTF-8 terminals

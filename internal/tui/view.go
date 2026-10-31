@@ -21,11 +21,11 @@ func (m Model) View() tea.View {
 }
 
 // render composes the whole screen from the model state and the terminal
-// size — header bar, table with its detail pane, optional filter line and
-// rate-limit wait line, then the status bar and the help bar as separate
-// zones. Every zone is sized by planScreen, so the composition always fits
-// the terminal and the status and help lines can never overwrite each
-// other.
+// size — header bar, table with its detail pane, optional filter line, add
+// input and rate-limit wait line, then the status bar and the help bar as
+// separate zones. Every zone is sized by planScreen, so the composition
+// always fits the terminal and the status and help lines can never
+// overwrite each other.
 func (m Model) render() string {
 	th := m.theme
 	w, h := m.width, m.height
@@ -52,6 +52,19 @@ func (m Model) render() string {
 	a := m.selected()
 	filterOn := m.filtering || m.filter != ""
 
+	// Add-flow geometry: the input line, its validation hint (once there is
+	// something to validate) and the target-flavor prompt.
+	addH := 0
+	if m.addInput {
+		addH = 1
+		if m.addText != "" {
+			addH++ // the validation hint or error line
+		}
+	}
+	if m.addChoose {
+		addH++
+	}
+
 	// Detail pane geometry feeds the plan: the overlay needs its content
 	// height up front, the side pane is sized by planScreen itself.
 	detailW := maxInt(8, w-4)
@@ -59,7 +72,7 @@ func (m Model) render() string {
 	if m.detail {
 		overlayNeed = len(m.detailContent(a, detailW)) + 2 // border rows
 	}
-	plan := planScreen(w, h, m.detail, filterOn, m.wait != "", overlayNeed)
+	plan := planScreen(w, h, m.detail, filterOn, m.wait != "", addH, overlayNeed)
 
 	// Table geometry: responsive columns from the terminal width and the
 	// visible content, then the rows styled and truncated to those widths.
@@ -96,6 +109,18 @@ func (m Model) render() string {
 	if plan.filterH > 0 {
 		b.WriteString("\n")
 		b.WriteString(m.filterLine(w))
+	}
+	if m.addInput {
+		b.WriteString("\n")
+		b.WriteString(m.addLine(w))
+		if m.addText != "" {
+			b.WriteString("\n")
+			b.WriteString(m.addHintLine(w))
+		}
+	}
+	if m.addChoose {
+		b.WriteString("\n")
+		b.WriteString(m.flavorPrompt(w))
 	}
 	if plan.waitH > 0 {
 		b.WriteString("\n")
@@ -307,19 +332,77 @@ func (m Model) filterLine(width int) string {
 	return clip(line, width, th.g.Ellipsis)
 }
 
+// addLine renders the add input line: the reference being typed with the
+// input cursor.
+func (m Model) addLine(width int) string {
+	th := m.theme
+	line := th.dim.Render("add: ") + m.addText + th.accent.Render(th.g.Cursor)
+	return clip(line, width, th.g.Ellipsis)
+}
+
+// addHintLine renders the add input's live validation: the parse error in
+// the failure color, or the parsed reference the way the add flow will
+// install it.
+func (m Model) addHintLine(width int) string {
+	th := m.theme
+	switch {
+	case m.addErr != nil:
+		return th.bad.Render(clip(clean(m.addErr.Error()), width, th.g.Ellipsis))
+	case m.addParsed.Kind != "":
+		return th.dim.Render(clip(th.g.Arrow+" "+addRefLabel(m.addParsed), width, th.g.Ellipsis))
+	}
+	return ""
+}
+
+// addRefLabel renders the parsed reference the way the add flow will
+// install it: "github owner/repo", "wago <key>", "curseforge <key>" or
+// "git <remote>".
+func addRefLabel(ref service.AddRef) string {
+	switch ref.Kind {
+	case state.SourceGitHub:
+		return "github " + ref.Repo.Slug()
+	case state.SourceWago:
+		return "wago " + ref.Key
+	case state.SourceCfwidget:
+		return "curseforge " + ref.Key
+	default:
+		return "git " + ref.URL
+	}
+}
+
+// flavorPrompt renders the target-flavor question asked when several
+// clients are configured: the flavors as numbered choices with the cursor
+// on the active one — the default Enter accepts.
+func (m Model) flavorPrompt(width int) string {
+	th := m.theme
+	parts := make([]string, 0, len(m.status.Clients))
+	for i, c := range m.status.Clients {
+		label := fmt.Sprintf("%d %s", i+1, c.FlavorName)
+		if c.Flavor == m.client.Flavor {
+			label += " (active)"
+		}
+		if i == m.addCursor {
+			label = th.title.Render(label)
+		}
+		parts = append(parts, label)
+	}
+	return clip("add to flavor: "+strings.Join(parts, th.dim.Render(" "+th.g.MidDot+" "))+
+		th.dim.Render(" "+th.g.Dash+" up/down picks, enter adds, esc cancels"), width, th.g.Ellipsis)
+}
+
 // waitLine renders the rate-limit wait line: the live reason one unit is
 // stalled ("rate limited, retry after 5m") while the wait lasts.
 func (m Model) waitLine(width int) string {
 	return m.theme.warn.Render(clip(m.wait, width, m.theme.g.Ellipsis))
 }
 
-// statusBar renders the status zone: the sync run frame beside the spinner
-// while a sync runs — how far the run has come and how it is going — then
-// the current message. It occupies exactly one line of its own.
+// statusBar renders the status zone: the run frame beside the spinner
+// while a sync or add runs — how far the run has come and how it is going
+// — then the current message. It occupies exactly one line of its own.
 func (m Model) statusBar(width int) string {
 	th := m.theme
 	line := m.statusLine
-	if m.syncing {
+	if m.syncing || m.adding {
 		line = strings.TrimRight(m.spin.View(), " ") + " " + m.runFrame()
 		if m.statusLine != "" {
 			line += " " + th.g.MidDot + " " + th.dim.Render(m.statusLine)

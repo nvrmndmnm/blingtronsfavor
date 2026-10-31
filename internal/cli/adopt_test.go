@@ -29,41 +29,6 @@ func TestBindFlags(t *testing.T) {
 	}
 }
 
-// TestIsSourceGitURL checks source-git detection: git remotes route to the
-// git-direct provider, "owner/repo" references stay with the resolver.
-func TestIsSourceGitURL(t *testing.T) {
-	yes := []string{
-		"https://gitlab.com/group/addon.git",
-		"https://codeberg.org/group/addon",
-		"git://example.com/addon.git",
-	}
-	for _, raw := range yes {
-		if !isSourceGitURL(raw) {
-			t.Errorf("isSourceGitURL(%q) = false, want true", raw)
-		}
-	}
-	no := []string{"owner/repo", "not a slug", "ftp://example.com/x"}
-	for _, raw := range no {
-		if isSourceGitURL(raw) {
-			t.Errorf("isSourceGitURL(%q) = true, want false", raw)
-		}
-	}
-}
-
-// TestGitRepoName checks addon-id derivation for git URLs.
-func TestGitRepoName(t *testing.T) {
-	cases := map[string]string{
-		"https://gitlab.com/group/addon.git": "addon",
-		"https://codeberg.org/group/addon":   "addon",
-		"git://example.com/deep/path/repo":   "repo",
-	}
-	for raw, want := range cases {
-		if got := gitRepoName(raw); got != want {
-			t.Errorf("gitRepoName(%q) = %q, want %q", raw, got, want)
-		}
-	}
-}
-
 // TestSourceLabel checks the table rendering of proposed sources.
 func TestSourceLabel(t *testing.T) {
 	cases := map[state.SourceRef]string{

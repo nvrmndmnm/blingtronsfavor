@@ -6,7 +6,7 @@ import (
 
 // keyMap is the TUI key map, exactly the bindings the UX contract fixes:
 //
-//	u update all · U update one · c check · r refresh ·
+//	u update all · a add · U update one · c check · r refresh ·
 //	s toggle release/branch · d delete (confirm) ·
 //	enter detail pane · / filter · q quit
 //
@@ -17,6 +17,7 @@ type keyMap struct {
 	Detail    key.Binding
 	Filter    key.Binding
 	Update    key.Binding
+	Add       key.Binding
 	UpdateOne key.Binding
 	Check     key.Binding
 	Refresh   key.Binding
@@ -34,6 +35,7 @@ func newKeyMap(g glyphs) keyMap {
 		Detail:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
+		Add:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		UpdateOne: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update one")),
 		Check:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "check")),
 		Refresh:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
@@ -47,13 +49,13 @@ func newKeyMap(g glyphs) keyMap {
 
 // ShortHelp renders the compact bottom help bar.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Update, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
+	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Quit}
 }
 
 // FullHelp renders the two-row help page.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Detail, k.Filter},
-		{k.Update, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Quit},
+		{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Quit},
 	}
 }

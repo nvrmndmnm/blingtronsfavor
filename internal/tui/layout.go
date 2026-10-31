@@ -33,13 +33,15 @@ type screenPlan struct {
 	overlayH       int  // toggle-overlay detail height, 0 when absent
 	filterH        int  // filter line height, 0 or 1
 	waitH          int  // rate-limit wait line height, 0 or 1
+	addH           int  // add input + hint + flavor prompt heights, 0–3
 }
 
 // planScreen computes the screen geometry for one terminal size and view
 // state. wantDetail is the detail toggle state (only meaningful below the
-// side-pane width) and overlayNeed is the height the overlay would like to
-// have (content plus its border).
-func planScreen(w, h int, wantDetail, filterOn, waitOn bool, overlayNeed int) screenPlan {
+// side-pane width), addH is the height the add flow's input and prompt
+// lines want, and overlayNeed is the height the overlay would like to have
+// (content plus its border).
+func planScreen(w, h int, wantDetail, filterOn, waitOn bool, addH, overlayNeed int) screenPlan {
 	p := screenPlan{width: w, height: h}
 	fixed := headerZoneH + statusZoneH + helpZoneH
 	if filterOn {
@@ -50,6 +52,8 @@ func planScreen(w, h int, wantDetail, filterOn, waitOn bool, overlayNeed int) sc
 		p.waitH = 1
 		fixed++
 	}
+	p.addH = clampInt(addH, 0, 3)
+	fixed += p.addH
 	if w >= sideDetailMinWidth {
 		p.side = true
 		p.detailW = clampInt(w/3, 28, 44)
