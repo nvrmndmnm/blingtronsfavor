@@ -100,6 +100,8 @@ type Model struct {
 	filter        string             // case-insensitive name/source filter
 	sort          sortMode           // active row ordering ("o" cycles it)
 	confirm       bool               // delete confirmation pending
+	quitAsk       string             // quit confirmation pending: its question, "" when none
+	helpOpen      bool               // full-screen help overlay (?) open
 	addInput      bool               // "a" add input active
 	addText       string             // the reference being typed
 	addParsed     service.AddRef     // live parse of addText

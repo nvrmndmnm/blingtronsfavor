@@ -161,9 +161,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // prompt, filter input, delete confirmation, normal mode).
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ctrl+c works in every mode: it cancels a running sync first — through
-	// the installer's rollback — and quits otherwise.
+	// the installer's rollback — and then offers quit; idle it quits.
 	if msg.String() == "ctrl+c" {
-		return m.cancelOrQuit()
+		return m.interrupt()
+	}
+
+	// The help overlay answers only its own keys: ? or esc closes it and q
+	// quits (asking while a run is in flight). Everything else is ignored
+	// so a stray key cannot trigger an action behind the overlay.
+	if m.helpOpen {
+		switch msg.String() {
+		case "?", "esc":
+			m.helpOpen = false
+		case "q":
+			return m.quit()
+		}
+		return m, nil
+	}
+
+	// The pending quit confirmation is modal: y confirms (any in-flight
+	// install rolls back as the TUI exits), esc withdraws the question.
+	if m.quitAsk != "" {
+		switch {
+		case key.Matches(msg, m.keys.Confirm):
+			return m.confirmQuit()
+		case key.Matches(msg, m.keys.Cancel):
+			m.quitAsk = ""
+			m.statusLine = "quit cancelled"
+		}
+		return m, nil
 	}
 
 	if m.addInput {
@@ -289,7 +315,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case m.detailFocus && key.Matches(msg, m.keys.PgDn):
 		m.scrollDetail(m.detailPageSize())
 	case key.Matches(msg, m.keys.Quit):
-		return m.cancelOrQuit()
+		return m.quit()
+	case key.Matches(msg, m.keys.Help):
+		m.helpOpen = true
 	case key.Matches(msg, m.keys.Detail):
 		if m.detailFocus {
 			// enter returns to the table; the toggle overlay closes with it.
@@ -396,17 +424,48 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// cancelOrQuit is the quit key's behavior: a running sync or add is
-// cancelled first — its in-flight install rolls back through the installer,
-// which the confirmation states — and the TUI quits on the next press.
-func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
+// quit is the "q" key's behavior (R2 — deliberately split from ctrl+c):
+// idle it quits at once; while a sync or add is in flight it never cancels
+// silently — it asks first, and the question states that quitting rolls
+// back the in-flight install.
+func (m Model) quit() (tea.Model, tea.Cmd) {
+	m.helpOpen = false
 	if m.syncing || m.adding {
-		m.statusLine = "cancelling " + m.theme.g.Dash + " the in-flight install rolls back (press q again to quit)"
+		m.quitAsk = "quit? quitting rolls back the in-flight install " + m.theme.g.Dash +
+			" y quits, esc keeps the run going"
+		return m, nil
+	}
+	m.quitting = true
+	return m, tea.Quit
+}
+
+// interrupt is the "ctrl+c" key's behavior (R2), active in every mode: a
+// running sync or add is cancelled first — its in-flight install rolls
+// back through the installer, which the offer states — and quit is then
+// offered. Idle it quits at once.
+func (m Model) interrupt() (tea.Model, tea.Cmd) {
+	m.helpOpen = false
+	if m.syncing || m.adding {
+		m.quitAsk = "sync cancelled " + m.theme.g.Dash + " the in-flight install rolls back " +
+			m.theme.g.Dash + " quit? y quits, esc stays"
 		if m.cancelSync != nil {
 			m.cancelSync()
 			m.cancelSync = nil
 		}
 		return m, nil
+	}
+	m.quitting = true
+	return m, tea.Quit
+}
+
+// confirmQuit answers the quit offer: any in-flight run is cancelled — its
+// install rolls back through the installer — and the TUI exits. Run keeps
+// the process alive until that rollback finishes.
+func (m Model) confirmQuit() (tea.Model, tea.Cmd) {
+	m.quitAsk = ""
+	if m.cancelSync != nil {
+		m.cancelSync()
+		m.cancelSync = nil
 	}
 	m.quitting = true
 	return m, tea.Quit

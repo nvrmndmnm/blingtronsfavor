@@ -194,16 +194,21 @@ func TestFailedRowKeepsErrorAfterRun(t *testing.T) {
 	}
 }
 
-func TestCancelExplainsRollback(t *testing.T) {
+// TestQuitQuestionStatesRollback pins the screen-level acceptance for
+// quitting mid-run (R2): the confirmation is on screen and states that
+// quitting rolls back the in-flight install.
+func TestQuitQuestionStatesRollback(t *testing.T) {
 	m := testModel(t)
+	m = resize(t, m, 100, 40)
 	m.syncing = true
 	m.cancelSync = func() {}
-	next, _ := m.cancelOrQuit()
+	next, _ := m.Update(keyMsg('q'))
 	m = next.(Model)
-	if want := "cancelling — the in-flight install rolls back"; !strings.Contains(m.statusLine, want) {
-		t.Fatalf("statusLine = %q, want the rollback explanation", m.statusLine)
+	content := m.View().Content
+	if want := "rolls back"; !strings.Contains(content, want) {
+		t.Fatalf("view is missing the rollback explanation:\n%s", content)
 	}
 	if m.quitting {
-		t.Fatal("ctrl+c quit instead of cancelling the sync")
+		t.Fatal("q quit instead of asking")
 	}
 }
