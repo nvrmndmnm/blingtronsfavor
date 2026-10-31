@@ -48,7 +48,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.layout()
 		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -60,7 +59,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.live = m.run.sample()
 			m.wait = m.live.wait
 			m.refreshRows()
-			m.layout()
 		}
 		return m, cmd
 	case syncDoneMsg:
@@ -76,7 +74,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.wait = "rate limited, " + msg.report.RateHint
 			}
 		}
-		m.layout()
 		return m, loadStatus()
 	case statusMsg:
 		if msg.err != nil {
@@ -139,7 +136,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.refreshRows()
-		m.layout()
 		return m, nil
 	}
 
@@ -159,7 +155,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.cancelOrQuit()
 	case key.Matches(msg, m.keys.Detail):
 		m.detail = !m.detail
-		m.layout()
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.statusLine = "filter: type to narrow the list, enter applies, esc clears"
@@ -189,7 +184,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // the confirmation states — and the TUI quits on the next press.
 func (m Model) cancelOrQuit() (tea.Model, tea.Cmd) {
 	if m.syncing {
-		m.statusLine = "cancelling — the in-flight install rolls back"
+		m.statusLine = "cancelling " + m.theme.g.Dash + " the in-flight install rolls back (press q again to quit)"
 		if m.cancelSync != nil {
 			m.cancelSync()
 			m.cancelSync = nil
@@ -267,7 +262,7 @@ func (m Model) doDelete() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	id, flavor := a.ID, client.Flavor(m.client.Flavor)
-	m.statusLine = "deleting " + id + "…"
+	m.statusLine = "deleting " + id + m.theme.g.Ellipsis
 	return m, func() tea.Msg {
 		err := service.RemoveAddon(m.ctx, flavor, id)
 		return deleteMsg{id: id, err: err}

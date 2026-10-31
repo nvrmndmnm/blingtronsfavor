@@ -23,10 +23,10 @@ type keyMap struct {
 	Quit    key.Binding
 }
 
-func newKeyMap() keyMap {
+func newKeyMap(g glyphs) keyMap {
 	return keyMap{
-		Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp(g.Up+"/k", "up")),
+		Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp(g.Down+"/j", "down")),
 		Detail:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Update:  key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),

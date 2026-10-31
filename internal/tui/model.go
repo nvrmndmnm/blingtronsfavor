@@ -12,9 +12,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/state"
 )
 
 // Run opens the TUI. The context is signal-aware: SIGINT cancels an
@@ -37,6 +37,9 @@ type Options struct {
 	// Version is the tool version reported to upstreams; the service layer
 	// owns the actual user agent.
 	Version string
+	// ASCII forces the ASCII glyph set regardless of the terminal locale
+	// (the --ascii flag). Colors are unaffected: NO_COLOR governs those.
+	ASCII bool
 }
 
 // runtime is the machinery shared between the program harness and the
@@ -67,10 +70,13 @@ func (rt *runtime) setProgram(p *tea.Program) {
 
 // Model is the TUI model: the addon table with the header, detail pane and
 // status line around it. It holds no business logic — every action is a call
-// into internal/service, the same functions the CLI uses.
+// into internal/service, the same functions the CLI uses. Presentation
+// tokens live in the theme, geometry in planScreen, so the rendering stays
+// a pure function of state + theme + size.
 type Model struct {
-	ctx context.Context
-	rt  *runtime
+	ctx   context.Context
+	rt    *runtime
+	theme theme
 
 	status service.Status
 	client service.ClientRow
@@ -102,20 +108,51 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	if rt == nil {
 		rt = &runtime{}
 	}
-	spin := spinner.New(spinner.WithSpinner(spinner.Dot))
-	tbl := table.New(table.WithColumns(columnsFor(0)), table.WithHeight(10), table.WithFocused(true))
+	c := detectCaps(opts.ASCII)
+	th := newTheme(c)
+	spinSet := spinner.Dot
+	if !c.unicode {
+		spinSet = spinner.Line
+	}
+	spin := spinner.New(spinner.WithSpinner(spinSet))
+	helpBar := help.New()
+	helpBar.ShortSeparator = " " + th.g.MidDot + " "
+	helpBar.Ellipsis = th.g.Ellipsis
+	helpBar.Styles.ShortKey = th.title
+	helpBar.Styles.ShortDesc = th.dim
+	helpBar.Styles.ShortSeparator = th.dim
+	helpBar.Styles.Ellipsis = th.dim
+	helpBar.Styles.FullKey = th.title
+	helpBar.Styles.FullDesc = th.dim
+	helpBar.Styles.FullSeparator = th.dim
+	cols := []table.Column{
+		{Title: "Addon", Width: 24},
+		{Title: "Installed", Width: 12},
+		{Title: "Upstream", Width: 14},
+		{Title: "Strategy", Width: 13},
+		{Title: "Status", Width: 18},
+	}
+	tbl := table.New(table.WithColumns(cols), table.WithHeight(10), table.WithFocused(true))
+	tbl.SetStyles(table.Styles{
+		Header: th.title,
+		Cell:   lipgloss.NewStyle().Padding(0, 1),
+		// Selection is painted per cell (the accent) so the status color
+		// survives on the selected row.
+		Selected: lipgloss.NewStyle(),
+	})
 	m := Model{
 		ctx:     ctx,
 		rt:      rt,
+		theme:   th,
 		table:   tbl,
 		spin:    spin,
-		help:    help.New(),
-		keys:    newKeyMap(),
+		help:    helpBar,
+		keys:    newKeyMap(th.g),
 		results: map[string]service.Result{},
 	}
 	if st, err := service.LoadStatus(); err == nil {
 		m.status = st
-		m.statusLine = "ready — q quits, u updates all"
+		m.statusLine = fmt.Sprintf("ready %s q quits, u updates all", th.g.Dash)
 	} else {
 		m.statusLine = "error: " + err.Error()
 	}
@@ -136,7 +173,8 @@ func (m *Model) pickClient() {
 }
 
 // refreshRows rebuilds the visible rows (applying the filter) and the table
-// rows on top of them.
+// rows on top of them. The rows hold the plain cell text; render() restyles
+// and truncates them to the responsive column widths.
 func (m *Model) refreshRows() {
 	m.rows = nil
 	for _, a := range m.client.Addons {
@@ -147,14 +185,8 @@ func (m *Model) refreshRows() {
 	}
 	rows := make([]table.Row, 0, len(m.rows))
 	for _, a := range m.rows {
-		cells := table.Row{a.Name, a.Installed, a.Upstream, service.StrategyLabel(state.Strategy(a.Strategy)), m.statusText(a)}
-		if m.failed(a.ID) {
-			// A failed row stays visibly failed after the run (red).
-			for i := range cells {
-				cells[i] = failedStyle.Render(cells[i])
-			}
-		}
-		rows = append(rows, cells)
+		cells, _ := m.plainCells(a)
+		rows = append(rows, table.Row(cells))
 	}
 	m.table.SetRows(rows)
 }
@@ -175,7 +207,7 @@ func (m *Model) statusText(a service.AddonRow) string {
 		return terminalText(l)
 	}
 	if r, ok := m.resultFor(a.ID); ok {
-		if s := outcomeText(r); s != "" {
+		if s := m.outcomeText(r); s != "" {
 			return s
 		}
 	}
@@ -184,13 +216,13 @@ func (m *Model) statusText(a service.AddonRow) string {
 
 // outcomeText renders one decided outcome in the CLI live block's words:
 // "up to date", "updated 12.1.17 → 12.1.18", "failed: <reason>".
-func outcomeText(r service.Result) string {
+func (m Model) outcomeText(r service.Result) string {
 	switch r.Kind {
 	case service.ResultUpdated:
 		if r.From == "-" {
 			return "installed " + r.To
 		}
-		return "updated " + r.From + " → " + r.To
+		return "updated " + r.From + " " + m.theme.g.Arrow + " " + r.To
 	case service.ResultUpToDate:
 		return "up to date"
 	case service.ResultAvailable:
@@ -240,24 +272,19 @@ func (m Model) resultFor(id string) (service.Result, bool) {
 	return r, ok
 }
 
-// failed reports whether the addon's outcome is a failure — the row that
-// must stay visibly failed after the run.
-func (m Model) failed(id string) bool {
-	r, ok := m.resultFor(id)
-	return ok && r.Kind == service.ResultFailed
-}
-
 // runFrame renders the sync run frame the status bar shows while a sync
 // runs: how far the run has come and how it is going — "syncing 2/4 · 1
-// done · 1 failed".
+// done · 1 failed". The separators follow the glyph set like everything
+// else on screen.
 func (m Model) runFrame() string {
+	sep := " " + m.theme.g.MidDot + " "
 	if m.live.total == 0 {
-		return "syncing…"
+		return "syncing" + m.theme.g.Ellipsis
 	}
-	s := fmt.Sprintf("syncing %d/%d · %d done · %d failed",
-		m.live.done+m.live.failed+m.live.skipped, m.live.total, m.live.done, m.live.failed)
+	s := fmt.Sprintf("syncing %d/%d%s%d done%s%d failed",
+		m.live.done+m.live.failed+m.live.skipped, m.live.total, sep, m.live.done, sep, m.live.failed)
 	if m.live.skipped > 0 {
-		s += fmt.Sprintf(" · %d skipped", m.live.skipped)
+		s += fmt.Sprintf("%s%d skipped", sep, m.live.skipped)
 	}
 	return s
 }
@@ -271,6 +298,18 @@ func clean(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// counts summarizes the active client's addons for the header bar: the
+// addon total and how many offer an update.
+func (m *Model) counts() (total, updates int) {
+	total = len(m.client.Addons)
+	for _, a := range m.client.Addons {
+		if strings.HasPrefix(m.statusText(a), "update ") {
+			updates++
+		}
+	}
+	return total, updates
 }
 
 // selected returns the addon the table cursor points at, or nil.

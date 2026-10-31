@@ -17,7 +17,18 @@ import (
 // testModel points bfctl's config and cache at fresh temp directories with
 // one forever client and two addons, and builds the initial model.
 func testModel(t *testing.T) Model {
+	return testModelOpts(t, Options{})
+}
+
+// testModelOpts is testModel with explicit TUI options (the --ascii flag
+// path). The locale is pinned to UTF-8 so the theme's glyph set is
+// deterministic regardless of the host environment; the --ascii flag (and
+// viewTest's own env setup) exercises the fallbacks.
+func testModelOpts(t *testing.T, opts Options) Model {
 	t.Helper()
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "C.UTF-8")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	if err := paths.EnsureLayout(); err != nil {
@@ -39,7 +50,7 @@ func testModel(t *testing.T) Model {
 	if err := state.Open(path).Save(st); err != nil {
 		t.Fatal(err)
 	}
-	return NewModel(context.Background(), Options{}, &runtime{})
+	return NewModel(context.Background(), opts, &runtime{})
 }
 
 // keyMsg builds one printable key press.
