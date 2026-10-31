@@ -280,10 +280,35 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.cancelSync()
 			m.cancelSync = nil
 		}
+	case m.detailFocus && key.Matches(msg, m.keys.Up):
+		m.scrollDetail(-1)
+	case m.detailFocus && key.Matches(msg, m.keys.Down):
+		m.scrollDetail(1)
+	case m.detailFocus && key.Matches(msg, m.keys.PgUp):
+		m.scrollDetail(-m.detailPageSize())
+	case m.detailFocus && key.Matches(msg, m.keys.PgDn):
+		m.scrollDetail(m.detailPageSize())
 	case key.Matches(msg, m.keys.Quit):
 		return m.cancelOrQuit()
 	case key.Matches(msg, m.keys.Detail):
-		m.detail = !m.detail
+		if m.detailFocus {
+			// enter returns to the table; the toggle overlay closes with it.
+			m.detail = false
+			m.detailFocus = false
+			m.statusLine = ""
+		} else {
+			// enter focuses the detail pane — it scrolls while the content
+			// is long (R7).
+			m.detail = true
+			m.detailFocus = true
+			m.detailScroll = 0
+			m.statusLine = "detail: " + m.theme.g.Up + "/" + m.theme.g.Down + " scrolls, enter returns to the list"
+		}
+	case m.detailFocus && key.Matches(msg, m.keys.Cancel):
+		// esc drops the detail engagement the same way enter's toggle does.
+		m.detail = false
+		m.detailFocus = false
+		m.statusLine = ""
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
 		m.statusLine = "filter: type to narrow the list, enter applies, esc clears"
@@ -348,8 +373,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusLine = fmt.Sprintf("delete %s? y confirms, esc cancels", a.Name)
 		}
 	default:
+		before := m.table.Cursor()
 		var cmd tea.Cmd
 		m.table, cmd = m.table.Update(msg)
+		if m.table.Cursor() != before {
+			// The detail pane describes another addon now: back to its top.
+			m.detailScroll = 0
+		}
 		return m, cmd
 	}
 	return m, nil
