@@ -176,6 +176,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if len(m.status.Clients) > 1 {
+				// The flavor prompt takes over from the input: closing
+				// addInput keeps the modes mutually exclusive so the
+				// prompt's keys reach the prompt.
+				m.addInput = false
 				m.addChoose = true
 				m.addCursor = m.activeClientIndex()
 				m.statusLine = ""
