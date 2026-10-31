@@ -37,10 +37,11 @@ type ptyFixture struct {
 	raw      []byte        // every display byte so far
 }
 
-// newPTYFixture builds a fixture on a cols x rows terminal. stdoutTTY
-// sends the command's own stdout to the same terminal (the interactive
-// case, where results land inside the block) instead of a buffer.
-func newPTYFixture(t *testing.T, cols, rows int, stdoutTTY bool) *ptyFixture {
+// newPTYFixture builds a fixture on a cols x rows terminal and returns
+// its renderer with the fixture around it. stdoutTTY sends the command's
+// own stdout to the same terminal (the interactive case, where results
+// land inside the block) instead of a buffer.
+func newPTYFixture(t *testing.T, cols, rows int, stdoutTTY bool) (*ttyProgress, *ptyFixture) {
 	t.Helper()
 	freezeSpinner(t)
 	p := openPTY(t, cols, rows)
@@ -51,7 +52,7 @@ func newPTYFixture(t *testing.T, cols, rows int, stdoutTTY bool) *ptyFixture {
 	}
 	f.prog = newTTYProgress(p.slave, out, "syncing")
 	t.Cleanup(f.prog.Stop)
-	return f
+	return f.prog, f
 }
 
 // step runs one renderer action, folds the bytes it wrote into the screen

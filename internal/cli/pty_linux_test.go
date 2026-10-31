@@ -33,7 +33,9 @@ func openPTY(t *testing.T, cols, rows int) *ptyPair {
 	}
 	p := &ptyPair{master: mfd}
 	t.Cleanup(func() { _ = unix.Close(mfd) })
-	if err := unix.IoctlSetInt(mfd, unix.TIOCSPTLCK, 0); err != nil {
+	// TIOCSPTLCK takes a pointer to the lock value (int *), not an
+	// immediate — IoctlSetPointerInt passes &value, unlike IoctlSetInt.
+	if err := unix.IoctlSetPointerInt(mfd, unix.TIOCSPTLCK, 0); err != nil {
 		t.Fatalf("unlock pty: %v", err)
 	}
 	n, err := unix.IoctlGetInt(mfd, unix.TIOCGPTN)

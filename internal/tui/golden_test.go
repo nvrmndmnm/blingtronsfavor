@@ -249,7 +249,7 @@ func TestGoldenFrames(t *testing.T) {
 func TestGoldenHelpPage(t *testing.T) {
 	m := goldenBase(t, caps{unicode: true, color: true}, 100, 28)
 	m.help.SetWidth(100)
-	goldenContent(t, "help-full-100", m.help.FullHelpView(m.keys))
+	goldenContent(t, "help-full-100", m.help.FullHelpView(m.keys.FullHelp()))
 }
 
 // goldenTwoClients builds a frame fixture with two configured clients
@@ -265,6 +265,7 @@ func goldenTwoClients(t *testing.T, c caps, w, h int) Model {
 		t.Setenv("NO_COLOR", "1")
 	}
 	m := testModelTwoClients(t)
+	m.client.Root = "/games/World of Warcraft/_classic_"
 	m.width, m.height = w, h
 	m.checkedAt = goldenTime
 	return m
