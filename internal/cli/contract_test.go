@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -428,5 +429,87 @@ func runInterruptChild() {
 	for {
 		prog.Handle(ev)
 		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestLiveBlockFallbacksRenderOnAnyTerminal pins the live block's terminal
+// capability fallbacks (XD-45, proposal B3) on the block's own vocabulary:
+// with NO_COLOR set not one color byte reaches the screen and every word
+// stays (the color-never-alone rule, risk R4), and a non-UTF-8 terminal
+// gets the ASCII spinner — not one non-ASCII byte — with the rows intact.
+func TestLiveBlockFallbacksRenderOnAnyTerminal(t *testing.T) {
+	const styled = "\x1b[32mforever/DeadlyBossMods: updated 12.1.17 -> 12.1.18\x1b[0m\n"
+	run := func() (*bytes.Buffer, *bytes.Buffer) {
+		var term, out bytes.Buffer
+		prog := newProgressRenderer(&term, progressOptions{TTY: true, Verb: "syncing", Stdout: &out})
+		prog.Handle(stepEvent(1, 2, "forever/DeadlyBossMods", service.PhaseResolving, service.Detail{}))
+		prog.Handle(stepEvent(1, 2, "forever/DeadlyBossMods", service.PhaseDone, service.Detail{Version: "12.1.18"}))
+		prog.Print(service.Unit{Flavor: client.Flavor("forever"), AddonID: "DeadlyBossMods"}, styled)
+		prog.Handle(stepEvent(2, 2, "forever/rarescanner", service.PhaseFailed, service.Detail{Err: errors.New("boom")}))
+		prog.Stop()
+		return &term, &out
+	}
+	words := []string{
+		"syncing: 1/2 forever/DeadlyBossMods: resolving",
+		"done: 1/2 forever/DeadlyBossMods: 12.1.18",
+		"forever/DeadlyBossMods: updated 12.1.17 -> 12.1.18",
+		"failed: 2/2 forever/rarescanner: boom",
+	}
+	t.Run("NO_COLOR: no color, all words intact", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "1")
+		term, out := run()
+		if out.String() != styled {
+			t.Errorf("stdout = %q, want the frozen line %q", out.String(), styled)
+		}
+		assertNoColorEscape(t, term.Bytes())
+		for _, want := range words {
+			if !strings.Contains(term.String(), want) {
+				t.Errorf("display lost the words %q: %q", want, term.String())
+			}
+		}
+	})
+	t.Run("non-UTF-8 terminal: ASCII spinner, all words intact", func(t *testing.T) {
+		t.Setenv("LC_ALL", "C")
+		t.Setenv("NO_COLOR", "")
+		term, out := run()
+		if out.String() != styled {
+			t.Errorf("stdout = %q, want the frozen line %q", out.String(), styled)
+		}
+		assertASCIIOnly(t, term.Bytes())
+		for _, want := range words {
+			if !strings.Contains(term.String(), want) {
+				t.Errorf("display lost the words %q: %q", want, term.String())
+			}
+		}
+	})
+}
+
+// TestLiveBlockClampsLongRowsAndKeepsGeometry pins the row clamp (XD-45,
+// proposal B4 — the XD-16 long-line caveat): rows are clamped to the
+// terminal width so a long version string can never wrap and corrupt the
+// redraw geometry, and the block's row bookkeeping stays exact across a
+// long run of long rows.
+func TestLiveBlockClampsLongRowsAndKeepsGeometry(t *testing.T) {
+	t.Setenv("LC_ALL", "C.UTF-8")
+	const width = 32
+	var term, out bytes.Buffer
+	prog := newProgressRenderer(&term, progressOptions{TTY: true, Verb: "syncing", Stdout: &out})
+	live := prog.(*ttyProgress)
+	live.width = width // the buffer has no size: pin the width rows clamp to
+	long := "RareScanner_FOREVER_1.60.1.b15-build.4712+abcdef0123456789"
+	for i := 1; i <= 6; i++ {
+		addon := fmt.Sprintf("addon%d", i)
+		unit := service.Unit{Flavor: client.Flavor("forever"), AddonID: addon}
+		prog.Handle(stepEvent(i, 6, "forever/"+addon, service.PhaseResolving, service.Detail{}))
+		prog.Handle(stepEvent(i, 6, "forever/"+addon, service.PhaseDone, service.Detail{Version: long}))
+		prog.Print(unit, "forever/"+addon+": "+long+"\n")
+	}
+	prog.Stop()
+	assertRowsFit(t, term.String(), width)
+	if live.drawn != live.totalLines() {
+		t.Errorf("drawn = %d rows, block has %d: geometry drifted", live.drawn, live.totalLines())
+	}
+	if got := strings.Count(out.String(), long+"\n"); got != 6 {
+		t.Errorf("stdout kept %d of 6 frozen result lines: %q", got, out.String())
 	}
 }
