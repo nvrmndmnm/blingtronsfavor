@@ -95,7 +95,8 @@ type Model struct {
 
 	detail        bool               // detail pane open
 	filtering     bool               // "/" filter input active
-	filter        string             // case-insensitive name filter
+	filter        string             // case-insensitive name/source filter
+	sort          sortMode           // active row ordering ("o" cycles it)
 	confirm       bool               // delete confirmation pending
 	addInput      bool               // "a" add input active
 	addText       string             // the reference being typed
@@ -201,20 +202,26 @@ func (m Model) activeClientIndex() int {
 	return 0
 }
 
-// refreshRows rebuilds the visible rows (applying the filter) and the table
-// rows on top of them. The rows hold the plain cell text; render() restyles
-// and truncates them to the responsive column widths. While an add runs,
-// the addon being added gets a provisional row — the live-row treatment —
-// until the refreshed snapshot carries the real one.
+// refreshRows rebuilds the visible rows (applying the filter and the
+// active sort) and the table rows on top of them. The rows hold the plain
+// cell text; render() restyles and truncates them to the responsive
+// column widths. The selected addon stays selected across the reorder, so
+// a refresh or a sort never moves the cursor onto another addon. While an
+// add runs, the addon being added gets a provisional row — the live-row
+// treatment — until the refreshed snapshot carries the real one.
 func (m *Model) refreshRows() {
+	sel := ""
+	if a := m.selected(); a != nil {
+		sel = a.ID
+	}
 	m.rows = nil
 	for _, a := range m.client.Addons {
-		if m.filter != "" && !containsFold(a.Name, m.filter) {
+		if m.filter != "" && !matchesFilter(a, m.filter) {
 			continue
 		}
 		m.rows = append(m.rows, a)
 	}
-	if m.addRow != nil && containsFold(m.addRow.Name, m.filter) {
+	if m.addRow != nil && matchesFilter(*m.addRow, m.filter) {
 		seen := false
 		for _, a := range m.rows {
 			if a.ID == m.addRow.ID {
@@ -230,12 +237,40 @@ func (m *Model) refreshRows() {
 			m.rows = append(m.rows, a)
 		}
 	}
+	m.sortRows(m.rows)
 	rows := make([]table.Row, 0, len(m.rows))
 	for _, a := range m.rows {
 		cells, _ := m.plainCells(a)
 		rows = append(rows, table.Row(cells))
 	}
 	m.table.SetRows(rows)
+	if sel != "" {
+		for i, a := range m.rows {
+			if a.ID == sel {
+				m.table.SetCursor(i)
+				break
+			}
+		}
+	}
+}
+
+// filterCounts reports the filter line's counts: how many rows the filter
+// matches and how many the list holds in total (the "2 of 12").
+func (m Model) filterCounts() (match, total int) {
+	total = len(m.client.Addons)
+	if m.addRow != nil {
+		seen := false
+		for _, a := range m.client.Addons {
+			if a.ID == m.addRow.ID {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			total++
+		}
+	}
+	return len(m.rows), total
 }
 
 // validateAdd re-parses the add input through the same parsers "bfctl add"
@@ -395,6 +430,15 @@ func (m *Model) selected() *service.AddonRow {
 		return nil
 	}
 	return &m.rows[i]
+}
+
+// matchesFilter reports whether the addon matches the active filter: a
+// case-insensitive match against its name or its source (the source kind
+// and reference — "github owner/repo", "wago key").
+func matchesFilter(a service.AddonRow, filter string) bool {
+	return containsFold(a.Name, filter) ||
+		containsFold(a.Source, filter) ||
+		containsFold(a.SourceKind, filter)
 }
 
 // containsFold reports whether haystack contains needle,

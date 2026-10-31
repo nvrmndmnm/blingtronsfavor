@@ -286,7 +286,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.detail = !m.detail
 	case key.Matches(msg, m.keys.Filter):
 		m.filtering = true
-		m.statusLine = "filter: type to narrow the list, enter applies, esc clears"
+		m.statusLine = "filter: type to narrow by name or source, enter applies, esc clears"
+	case key.Matches(msg, m.keys.Sort):
+		m.sort = m.sort.next()
+		m.refreshRows()
+		m.statusLine = "sorted by " + m.sort.label()
+	case msg.String() == "esc" && m.filter != "":
+		// esc returns to the full list: it drops the applied filter
+		// (while the filter input is open it cancels the input instead,
+		// above).
+		m.filter = ""
+		m.refreshRows()
+		m.statusLine = "filter cleared"
 	case key.Matches(msg, m.keys.Add):
 		switch {
 		case m.syncing || m.adding:
