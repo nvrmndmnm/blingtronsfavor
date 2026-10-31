@@ -181,6 +181,18 @@ func addFlavorFrame(t *testing.T, m Model) Model {
 	return press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 }
 
+// detailChangelogFrame is the completed detail pane (XD-42): one addon
+// carrying the whole A3 story — changelog, plain-language TOC verdict,
+// owned dirs and the source URL — shown in the persistent side pane.
+func detailChangelogFrame(t *testing.T, m Model) Model {
+	t.Helper()
+	row := detailRow()
+	m.rows = []service.AddonRow{row}
+	m.client.Addons = m.rows
+	m.results = nil // no sync result: the TOC verdict is the pane's story
+	return m
+}
+
 // TestGoldenFrames pins every screen state above as a golden frame.
 func TestGoldenFrames(t *testing.T) {
 	color := caps{unicode: true, color: true}
@@ -214,6 +226,29 @@ func TestGoldenFrames(t *testing.T) {
 		{"add-live-100", color, 100, 28, false, addLiveFrame},
 		{"add-flavor-100", color, 100, 28, true, addFlavorFrame},
 
+		// The P1 screens (XD-42 … XD-44), pinned as they land at the
+		// central merge: the completed detail pane, the sort cycle, the
+		// filter line with its match count and zero-match state, and the
+		// full help overlay around the help page.
+		{"detail-changelog-120", color, 120, 28, false, detailChangelogFrame},
+		{"sort-status-100", color, 100, 28, false, func(t *testing.T, m Model) Model {
+			return press(t, m, keyMsg('o'))
+		}},
+		{"filter-active-100", color, 100, 28, false, func(t *testing.T, m Model) Model {
+			m.filter = "owner"
+			m.refreshRows()
+			return m
+		}},
+		{"filter-empty-100", color, 100, 28, false, func(t *testing.T, m Model) Model {
+			m.filter = "zzz"
+			m.refreshRows()
+			return m
+		}},
+		{"help-overlay-100", color, 100, 28, false, func(t *testing.T, m Model) Model {
+			m.helpOpen = true
+			return m
+		}},
+
 		// NO_COLOR variants: no color codes, every word intact.
 		{"idle-80-nocolor", nocolor, 80, 28, false, nil},
 		{"sync-live-100-nocolor", nocolor, 100, 28, false, syncLiveFrame},
@@ -243,9 +278,9 @@ func TestGoldenFrames(t *testing.T) {
 }
 
 // TestGoldenHelpPage pins the full help page — every keybinding grouped by
-// context. This is the content contract the help overlay will show (the
-// overlay screen itself lands with its own issue, XD-44; when it does, one
-// more golden case pins the overlay around this page).
+// context. This is the content contract the help overlay shows; the
+// overlay around this page is pinned by the help-overlay-100 case in
+// TestGoldenFrames (XD-44).
 func TestGoldenHelpPage(t *testing.T) {
 	m := goldenBase(t, caps{unicode: true, color: true}, 100, 28)
 	m.help.SetWidth(100)
