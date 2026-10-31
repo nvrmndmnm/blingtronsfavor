@@ -228,6 +228,18 @@ or
 and the addon's result line then replaces that row outright, so every
 addon's whole story stays in one place.
 A rate-limit wait appends its reason to the row while it lasts.
+.Pp
+The block adapts to its terminal: on non-UTF-8 terminals the spinner
+falls back to plain ASCII frames
+.Pq Ar LC_ALL , LC_CTYPE , LANG
+are consulted, in that order,
+no color is drawn when
+.Ev NO_COLOR
+is set
+.Pq the words carry the meaning either way ,
+and every row is clamped to the terminal width, so a long version string
+can never wrap and disturb the redraw.
+.Pp
 Over a pipe
 .Pq CI log, file
 the same work streams as one incremental plain line per event, without

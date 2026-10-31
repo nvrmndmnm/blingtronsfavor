@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,59 @@ func sanitizeProgressText(s string) string {
 	}, s)
 }
 
+// termCaps are the terminal capabilities the live block renders for — the
+// CLI mirror of the TUI's caps (internal/tui/theme.go) so both surfaces
+// fall back alike: the locale decides the glyphs, NO_COLOR decides the
+// colors. Nothing the block shows may depend on a glyph or a color being
+// renderable (risk R4).
+type termCaps struct {
+	unicode bool // terminal locale is UTF-8: unicode glyphs allowed
+	color   bool // colors allowed (NO_COLOR-aware)
+}
+
+// detectTermCaps derives the capabilities from the environment.
+func detectTermCaps() termCaps {
+	return termCaps{
+		unicode: localeUTF8(),
+		color:   os.Getenv("NO_COLOR") == "",
+	}
+}
+
+// localeUTF8 reports whether the locale environment explicitly asks for
+// UTF-8. LC_ALL, LC_CTYPE and LANG are consulted in that order (POSIX
+// precedence); the first one set decides. With no locale set only Windows
+// defaults to unicode (Go writes UTF-8 to its console); everywhere else
+// the safe fallback is ASCII. (The same rule as internal/tui's localeUTF8.)
+func localeUTF8() bool {
+	for _, name := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		if val := os.Getenv(name); val != "" {
+			return strings.Contains(strings.ToLower(val), "utf")
+		}
+	}
+	return runtime.GOOS == "windows"
+}
+
+// asciiSpinner is the spinner set for non-UTF-8 terminals: spinner.Line's
+// plain-ASCII frames (the TUI's fallback), padded to the two-column shape
+// of spinner.Dot's braille frames so a row's geometry never depends on
+// which set is in use.
+var asciiSpinner = []string{"| ", "/ ", "- ", "\\ "}
+
+// terminalWidth reports w's width in columns when w is a terminal, and 0
+// when it is not or the size cannot be read: 0 is "no known bound", so a
+// display that is not a terminal is never clamped.
+func terminalWidth(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return 0
+	}
+	width, _, err := term.GetSize(f.Fd())
+	if err != nil {
+		return 0
+	}
+	return width
+}
+
 // quietProgress discards every event: "--quiet" emits no progress at all.
 type quietProgress struct {
 	out io.Writer
@@ -215,7 +269,9 @@ type fdWriter interface {
 // R6) shows its reason on the row while it lasts. Only rows are ever
 // rewritten; every other line lands whole in the scrollback. The spinner
 // frames are the TUI's (bubbles spinner.Dot) to keep both surfaces visually
-// alike.
+// alike, falling back to plain-ASCII frames on non-UTF-8 terminals (risk
+// R4), and every row is clamped to the terminal width so a long line can
+// never wrap and corrupt the redraw geometry (the XD-16 long-line caveat).
 type ttyProgress struct {
 	mu     sync.Mutex
 	w      io.Writer
@@ -224,6 +280,8 @@ type ttyProgress struct {
 	verb   string
 	frames []string
 	frame  int
+	color  bool // colors allowed (NO_COLOR-aware); the block draws none
+	width  int  // terminal columns rows are clamped to; 0 = unknown
 
 	entries []*blockEntry // the block, top to bottom
 	byUnit  map[service.Unit]*blockEntry
@@ -242,6 +300,11 @@ func newTTYProgress(w, out io.Writer, verb string) *ttyProgress {
 	if verb == "" {
 		verb = "working"
 	}
+	caps := detectTermCaps()
+	frames := spinner.Dot.Frames
+	if !caps.unicode {
+		frames = asciiSpinner
+	}
 	outTTY := false
 	if f, ok := out.(*os.File); ok {
 		outTTY = streamIsTTY(f)
@@ -251,7 +314,9 @@ func newTTYProgress(w, out io.Writer, verb string) *ttyProgress {
 		out:     out,
 		outTTY:  outTTY,
 		verb:    verb,
-		frames:  spinner.Dot.Frames,
+		frames:  frames,
+		color:   caps.color,
+		width:   terminalWidth(w),
 		byUnit:  make(map[service.Unit]*blockEntry),
 		done:    make(chan struct{}),
 		stopped: make(chan struct{}),
@@ -367,12 +432,10 @@ func (p *ttyProgress) Print(unit service.Unit, text string) {
 	_, _ = fmt.Fprint(p.w, "\r")
 	_, _ = fmt.Fprint(p.out, text)
 	if p.outTTY {
-		// The write advanced the terminal cursor over the text's lines.
-		advance := len(lines)
-		if !strings.HasSuffix(text, "\n") {
-			advance--
-		}
-		p.drawn = anchor + advance
+		// The write advanced the terminal cursor over the text's screen
+		// rows — wrapped rows included, which screenAdvance counts: the
+		// frozen write itself is never clamped.
+		p.drawn = anchor + screenAdvance(text, p.rowWidth())
 	} else {
 		p.drawn = anchor
 	}
@@ -409,6 +472,75 @@ func printLines(text string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+}
+
+// screenLine prepares one entry line for the screen. With NO_COLOR set no
+// styling reaches the screen at all (ansi.Strip drops every escape and
+// keeps every word — the color-never-alone rule, risk R4), and the line is
+// clamped to the terminal width so one entry line is always exactly one
+// screen row however long its text. The entry's text itself is untouched:
+// the full story stays in the block and in the frozen stdout lines.
+func (p *ttyProgress) screenLine(s string) string {
+	if !p.color {
+		s = ansi.Strip(s)
+	}
+	if w := p.rowWidth(); w > 0 {
+		s = ansi.Truncate(s, w, "")
+	}
+	return s
+}
+
+// rowWidth returns the width rows are clamped and wrap-counted at: the
+// terminal's live width re-probed as the stream is drawn, falling back to
+// the width measured at construction when the stream reports no size (a
+// test buffer). Re-probing keeps a resize mid-run from leaving stale
+// geometry; the fallback keeps non-terminal streams clampable.
+func (p *ttyProgress) rowWidth() int {
+	if w := p.terminalWidth(); w > 0 {
+		return w
+	}
+	return p.width
+}
+
+// screenAdvance returns how many screen rows the cursor drops when text is
+// written verbatim to a width-column terminal — Print's frozen stdout
+// write, which is never clamped and so may wrap. The block's bookkeeping
+// (drawn) must count every wrapped row or the redraw's cursor-up
+// arithmetic drifts (the XD-16 long-line caveat). width 0 is an unknown
+// width (the stream is not a terminal): one row per line, as ever.
+func screenAdvance(text string, width int) int {
+	lines := printLines(text)
+	n := 0
+	for i, line := range lines {
+		partial := i == len(lines)-1 && !strings.HasSuffix(text, "\n")
+		n += lineAdvance(ansi.StringWidth(line), width, partial)
+	}
+	return n
+}
+
+// lineAdvance returns the rows one written line contributes to the
+// cursor's advance on a width-column terminal. A complete line spans
+// 1+⌈(cells-1)/width⌉ rows — terminals wrap lazily, so a line ending
+// exactly at the right margin stays on its row — while a final line
+// without a newline leaves the cursor mid-row and counts only the rows it
+// crosses.
+func lineAdvance(cells, width int, partial bool) int {
+	if width <= 0 {
+		if partial {
+			return 0
+		}
+		return 1
+	}
+	if cells == 0 {
+		if partial {
+			return 0
+		}
+		return 1
+	}
+	if partial {
+		return (cells - 1) / width
+	}
+	return 1 + (cells-1)/width
 }
 
 // lineIndex returns the block-relative screen line where the entry starts.
@@ -462,8 +594,9 @@ func (p *ttyProgress) Stop() {
 }
 
 // terminalWidth reports the display width of the renderer's terminal
-// stream — 0 when the stream is not a terminal. Re-probed on every draw so
-// a resize mid-run can never leave stale geometry.
+// stream — 0 when the stream is not a terminal. Re-probed through
+// rowWidth on every draw so a resize mid-run can never leave stale
+// geometry.
 func (p *ttyProgress) terminalWidth() int {
 	w, ok := p.w.(fdWriter)
 	if !ok {
@@ -476,26 +609,15 @@ func (p *ttyProgress) terminalWidth() int {
 	return width
 }
 
-// clampLineWidth cuts one drawn row to the terminal's width so a long
-// version string can never soft-wrap and corrupt the redraw geometry —
-// every row stays exactly one screen line (the long-line drift guard). A
-// width of 0 (not a terminal) leaves the row untouched; the frozen stdout
-// lines Print writes are never clamped — only their redrawn screen copy is.
-func clampLineWidth(s string, width int) string {
-	if width <= 0 {
-		return s
-	}
-	return ansi.Truncate(s, width, "")
-}
-
 // draw repaints the whole block in place: the cursor moves to the block's
 // top line, every line is rewritten there, and any line the block no longer
 // has is erased. Rows are whole lines ending in "\n", so the cursor always
-// rests on a clean line below the block. Each row is clamped to the
-// terminal width, so the line count always matches the block geometry.
+// rests on a clean line below the block. Each row goes through screenLine —
+// NO_COLOR-aware and clamped to the terminal width — so one entry line is
+// always exactly one screen row and the line count always matches the
+// block geometry (the long-line drift guard).
 // Callers hold p.mu.
 func (p *ttyProgress) draw() {
-	width := p.terminalWidth()
 	if !p.hidden {
 		_, _ = fmt.Fprint(p.w, "\x1b[?25l")
 		p.hidden = true
@@ -509,7 +631,7 @@ func (p *ttyProgress) draw() {
 			if e.live && j == 0 {
 				prefix = p.frames[p.frame]
 			}
-			_, _ = fmt.Fprintf(p.w, "\r\x1b[2K%s\n", clampLineWidth(prefix+text, width))
+			_, _ = fmt.Fprintf(p.w, "\r\x1b[2K%s\n", p.screenLine(prefix+text))
 		}
 	}
 	n := p.totalLines()

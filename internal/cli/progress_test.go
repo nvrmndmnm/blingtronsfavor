@@ -3,9 +3,13 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
+
+	"charm.land/bubbles/v2/spinner"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/service"
@@ -48,6 +52,64 @@ func assertNoControlBytes(t *testing.T, out []byte) {
 			t.Fatalf("control byte %#x at offset %d in %q", b, i, out)
 		}
 	}
+}
+
+// assertNoColorEscape pins the NO_COLOR contract (risk R4): not one SGR
+// sequence — the only bytes that color a terminal — reaches the display.
+func assertNoColorEscape(t *testing.T, out []byte) {
+	t.Helper()
+	if re := regexp.MustCompile(`\x1b\[[0-9;]*m`); re.Match(out) {
+		t.Fatalf("display carried color %q", re.Find(out))
+	}
+}
+
+// assertASCIIOnly pins the non-UTF-8 terminal contract (risk R4): the
+// display never carries a non-ASCII byte.
+func assertASCIIOnly(t *testing.T, out []byte) {
+	t.Helper()
+	for i, b := range out {
+		if b >= 0x80 {
+			t.Fatalf("non-ASCII byte %#x at offset %d in %q", b, i, out)
+		}
+	}
+}
+
+// drawnRowRE matches one row rewrite on the display: draw() writes every
+// row as "\r\x1b[2K<row>\n", and an erased orphan row matches empty.
+var drawnRowRE = regexp.MustCompile("\r\x1b\\[2K([^\n]*)\n")
+
+// drawnRows returns the content of every row the renderer wrote to the
+// display, in order.
+func drawnRows(out string) []string {
+	var rows []string
+	for _, m := range drawnRowRE.FindAllStringSubmatch(out, -1) {
+		rows = append(rows, m[1])
+	}
+	return rows
+}
+
+// assertRowsFit pins the row clamp (proposal B4): every row the renderer
+// draws fits the terminal width, so one row is always one screen row and
+// the redraw's cursor arithmetic can never drift.
+func assertRowsFit(t *testing.T, out string, width int) {
+	t.Helper()
+	for i, row := range drawnRows(out) {
+		if w := ansi.StringWidth(row); w > width {
+			t.Errorf("drawn row %d is %d columns, want <= %d: %q", i, w, width, row)
+		}
+	}
+}
+
+// rowStartsWithAnyFrame reports whether the display drew one of frames in
+// front of want. The exact frame is not pinned (the spinner turns between
+// writes); only the set is.
+func rowStartsWithAnyFrame(out string, frames []string, want string) bool {
+	for _, frame := range frames {
+		if strings.Contains(out, frame+want) {
+			return true
+		}
+	}
+	return false
 }
 
 // ttyFixture builds a terminal renderer whose display goes to term and the
@@ -396,5 +458,150 @@ func TestProgressPrintWritesStdout(t *testing.T) {
 	}
 	if out.String() != result {
 		t.Errorf("stdout = %q, want %q", out.String(), result)
+	}
+}
+
+// TestProgressTTYSpinnerFramesFollowTheLocale pins the ASCII spinner
+// fallback (XD-45, proposal B3): the frames are the TUI's spinner.Dot on
+// UTF-8 terminals and spinner.Line's plain-ASCII set otherwise, so a
+// non-UTF-8 terminal never sees a non-ASCII byte (risk R4).
+func TestProgressTTYSpinnerFramesFollowTheLocale(t *testing.T) {
+	t.Run("UTF-8 terminal keeps the braille frames", func(t *testing.T) {
+		t.Setenv("LC_ALL", "C.UTF-8")
+		f := newTTYFixture()
+		f.prog.Handle(progressEvent(service.PhaseResolving, service.Detail{}))
+		f.prog.Stop() // quiesce the spinner before inspecting the output
+		if !rowStartsWithAnyFrame(f.term.String(), spinner.Dot.Frames, "syncing: 2/5 retail/weakauras: resolving") {
+			t.Errorf("live row did not spin with the braille frames: %q", f.term.String())
+		}
+	})
+	t.Run("non-UTF-8 terminal falls back to the ASCII frames", func(t *testing.T) {
+		t.Setenv("LC_ALL", "C")
+		f := newTTYFixture()
+		f.prog.Handle(progressEvent(service.PhaseResolving, service.Detail{}))
+		f.prog.Stop()
+		if !rowStartsWithAnyFrame(f.term.String(), asciiSpinner, "syncing: 2/5 retail/weakauras: resolving") {
+			t.Errorf("live row did not spin with the ASCII frames: %q", f.term.String())
+		}
+		assertASCIIOnly(t, f.term.Bytes())
+	})
+}
+
+// TestProgressTTYNoColorKeepsWordsIntact pins the NO_COLOR fallback (XD-45,
+// proposal B3): with NO_COLOR set no color reaches the screen — styling is
+// stripped from the display copy — while every word stays (the
+// color-never-alone rule) and the frozen stdout line keeps its bytes
+// untouched.
+func TestProgressTTYNoColorKeepsWordsIntact(t *testing.T) {
+	const styled = "\x1b[32mforever/DeadlyBossMods: updated 12.1.17 -> 12.1.18\x1b[0m\n"
+	t.Run("NO_COLOR strips color from the display", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "1")
+		f := newTTYFixture()
+		f.prog.Handle(progressEvent(service.PhaseDone, service.Detail{Version: "5.18.4"}))
+		f.prog.Print(service.Unit{Flavor: client.Flavor("forever"), AddonID: "DeadlyBossMods"}, styled)
+		f.prog.Stop()
+		if f.out.String() != styled {
+			t.Errorf("stdout = %q, want the frozen bytes %q", f.out.String(), styled)
+		}
+		assertNoColorEscape(t, f.term.Bytes())
+		for _, want := range []string{
+			"done: 2/5 retail/weakauras: 5.18.4",
+			"forever/DeadlyBossMods: updated 12.1.17 -> 12.1.18",
+		} {
+			if !strings.Contains(f.term.String(), want) {
+				t.Errorf("display lost the words %q: %q", want, f.term.String())
+			}
+		}
+	})
+	t.Run("color allowed leaves the display bytes untouched", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "")
+		f := newTTYFixture()
+		f.prog.Handle(progressEvent(service.PhaseDone, service.Detail{Version: "5.18.4"}))
+		f.prog.Print(service.Unit{Flavor: client.Flavor("forever"), AddonID: "DeadlyBossMods"}, styled)
+		f.prog.Stop()
+		if want := strings.TrimSuffix(styled, "\n"); !strings.Contains(f.term.String(), want) {
+			t.Errorf("display rewrote the styled text: %q", f.term.String())
+		}
+	})
+}
+
+// TestProgressTTYClampsRowsToTerminalWidth pins the row clamp (XD-45,
+// proposal B4): a long version string can never wrap its row — one entry
+// line is always one screen row — so the redraw geometry can never drift.
+// The row's text keeps the full story; only the screen copy is clamped.
+func TestProgressTTYClampsRowsToTerminalWidth(t *testing.T) {
+	f := newTTYFixture()
+	f.prog.width = 24 // the fixture's buffer has no size; pin the clamp width
+	const long = "RareScanner_FOREVER_1.60.1.b15-build.4712+abcdef0123456789"
+	f.prog.Handle(stepEvent(1, 2, "forever/rarescanner", service.PhaseResolving, service.Detail{}))
+	f.prog.Handle(stepEvent(1, 2, "forever/rarescanner", service.PhaseDone, service.Detail{Version: long}))
+	f.prog.Handle(stepEvent(2, 2, "forever/auctionator", service.PhaseResolving, service.Detail{}))
+	f.prog.Stop()
+	rows := f.rows()
+	if rows[0][0] != "done: 1/2 forever/rarescanner: "+long {
+		t.Errorf("row lost the full text: %q", rows[0][0])
+	}
+	assertRowsFit(t, f.term.String(), 24)
+}
+
+// TestProgressTTYLongPrintKeepsRedrawGeometry pins the frozen-write
+// geometry (XD-45, proposal B4): a result line longer than the terminal
+// wraps when it lands on the shared screen, and the block counts every
+// wrapped row and erases the orphaned rows afterwards, so the block's
+// cursor arithmetic never drifts however long the run goes.
+func TestProgressTTYLongPrintKeepsRedrawGeometry(t *testing.T) {
+	f := newTTYFixture()
+	f.prog.width = 10    // the fixture's buffer has no size; pin the width
+	f.prog.outTTY = true // the stdout write lands on the same screen
+	f.prog.Handle(stepEvent(1, 1, "forever/auctionator", service.PhaseDone, service.Detail{}))
+	const result = "forever/auctionator: updated 12.1.17 -> 12.1.18 plus a very long tail\n"
+	f.prog.Print(service.Unit{Flavor: client.Flavor("forever"), AddonID: "auctionator"}, result)
+	f.prog.Handle(stepEvent(2, 2, "forever/rarescanner", service.PhaseResolving, service.Detail{}))
+	f.prog.Stop()
+	if f.out.String() != result {
+		t.Errorf("stdout = %q, want the frozen line %q", f.out.String(), result)
+	}
+	if !strings.Contains(f.term.String(), "\r\x1b[2K\n") {
+		t.Errorf("the wrapped remainder was never erased: %q", f.term.String())
+	}
+	assertRowsFit(t, f.term.String(), 10)
+	if f.prog.drawn != f.prog.totalLines() {
+		t.Errorf("drawn = %d rows, block has %d: geometry drifted", f.prog.drawn, f.prog.totalLines())
+	}
+}
+
+// TestScreenAdvance pins the frozen-write row accounting: how far the
+// cursor drops when Print writes a line verbatim to a width-column
+// terminal. Terminals wrap lazily — a line ending exactly at the right
+// margin stays on its row — and a final line without a newline leaves the
+// cursor mid-row. Width 0 (not a terminal) keeps the old one-row-per-line
+// accounting.
+func TestScreenAdvance(t *testing.T) {
+	tests := []struct {
+		name  string
+		text  string
+		width int
+		want  int
+	}{
+		{"one short line", "abc\n", 10, 1},
+		{"one short line without newline", "abc", 10, 0},
+		{"line ending exactly at the margin", "0123456789\n", 10, 1},
+		{"wrapped line", "0123456789A\n", 10, 2},
+		{"margin line without newline", "0123456789", 10, 0},
+		{"wrapped line without newline", "0123456789A", 10, 1},
+		{"two lines", "a\nb\n", 10, 2},
+		{"two lines without final newline", "a\nb", 10, 1},
+		{"blank line", "\n", 10, 1},
+		{"escapes do not count as cells", "\x1b[31mabc\x1b[0m\n", 10, 1},
+		{"empty text", "", 10, 0},
+		{"unknown width: one row per line", strings.Repeat("x", 40) + "\n", 0, 1},
+		{"unknown width without newline", strings.Repeat("x", 40), 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := screenAdvance(tt.text, tt.width); got != tt.want {
+				t.Errorf("screenAdvance(%q, %d) = %d, want %d", tt.text, tt.width, got, tt.want)
+			}
+		})
 	}
 }
