@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
@@ -26,7 +25,7 @@ func runRemove(args []string, _ BuildInfo) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "bfctl remove: expected exactly one addon id")
+		fmt.Fprintln(os.Stderr, "bfctl remove: expected exactly one addon id — usage: bfctl remove <id>")
 		subcommandUsage(fs)
 		return ExitUsage
 	}
@@ -34,8 +33,7 @@ func runRemove(args []string, _ BuildInfo) int {
 
 	st, err := loadState()
 	if err != nil {
-		slog.Error("read state", "error", err)
-		return ExitError
+		return fail("remove", err, ExitError)
 	}
 	flavor, dirs, err := resolveRemoveFlavor(st, id, *flavorFlag)
 	if err != nil {
@@ -47,8 +45,7 @@ func runRemove(args []string, _ BuildInfo) int {
 	}
 
 	if err := service.RemoveAddon(context.Background(), flavor, id); err != nil {
-		slog.Error("remove", "addon", id, "error", err)
-		return ExitError
+		return fail("remove", err, ExitError)
 	}
 	word := "directories"
 	if len(dirs) == 1 {

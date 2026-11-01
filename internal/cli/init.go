@@ -19,24 +19,20 @@ func runInit(args []string, _ BuildInfo) int {
 	}
 	cfgDir, err := paths.ConfigDir()
 	if err != nil {
-		slog.Error("resolve config dir", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("resolve config dir: %w", err), ExitError, hintHome)
 	}
 	if err := paths.EnsureLayout(); err != nil {
-		slog.Error("create bfctl directories", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("create bfctl directories: %w", err), ExitError, `check that ~/.config and ~/.cache are writable`)
 	}
 	statePath, err := paths.StateFile()
 	if err != nil {
-		slog.Error("resolve state file", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("resolve state file: %w", err), ExitError, hintHome)
 	}
 	store := state.Open(statePath)
 	if *flavorDir != "" {
 		install, err := client.Detect(expandPathFlag("path", *flavorDir))
 		if err != nil {
-			slog.Error("detect client", "error", err)
-			return ExitError
+			return failHint("init", fmt.Errorf("detect client: %w", err), ExitError, `pass the World of Warcraft flavor directory (e.g. .../World of Warcraft/_forever_)`)
 		}
 		fmt.Printf("detected %s\n", install.Badge())
 		st, err := store.Load()
@@ -59,8 +55,7 @@ func runInit(args []string, _ BuildInfo) int {
 			Addons:    make(map[string]*state.AddonState),
 		}
 		if err := store.Save(st); err != nil {
-			slog.Error("write state file", "error", err)
-			return ExitError
+			return failHint("init", fmt.Errorf("write state file: %w", err), ExitError, `check that the bfctl config directory is writable`)
 		}
 		fmt.Printf("recorded %s -> %s\n", install.FlavorDir, statePath)
 		return ExitOK
@@ -71,12 +66,10 @@ func runInit(args []string, _ BuildInfo) int {
 		fmt.Printf("bfctl already initialised in %s\n", cfgDir)
 		return ExitOK
 	case !errors.Is(err, os.ErrNotExist):
-		slog.Error("inspect state file", "error", err)
-		return ExitError
+		return fail("init", fmt.Errorf("inspect state file: %w", err), ExitError)
 	}
 	if err := store.Save(state.New()); err != nil {
-		slog.Error("write state file", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("write state file: %w", err), ExitError, `check that the bfctl config directory is writable`)
 	}
 	fmt.Printf("initialised bfctl in %s\n", cfgDir)
 	return ExitOK

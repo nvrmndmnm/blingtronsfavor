@@ -60,12 +60,12 @@ func runAdopt(args []string, bi BuildInfo) int {
 		return code
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "bfctl adopt: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(os.Stderr, "bfctl adopt: unexpected argument %q — usage: bfctl adopt [flags]\n", fs.Arg(0))
 		subcommandUsage(fs)
 		return ExitUsage
 	}
 	if *yesFlag && *dryRunFlag {
-		fmt.Fprintln(os.Stderr, "bfctl adopt: --yes and --dry-run are mutually exclusive")
+		fmt.Fprintln(os.Stderr, "bfctl adopt: --yes and --dry-run are mutually exclusive — pass only one of them")
 		return ExitUsage
 	}
 
@@ -82,15 +82,13 @@ func runAdopt(args []string, bi BuildInfo) int {
 	cs := st.Client(flavor)
 	root, err := paths.ExpandPath(cs.Root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl adopt: resolve client root: %v\n", err)
-		return ExitError
+		return failHint("adopt", err, ExitError, `re-record the client root with "bfctl init --path <root>"`)
 	}
 	scanDir := *pathFlag
 	if scanDir == "" {
 		scanDir = filepath.Join(root, "Interface", "AddOns")
 	} else if scanDir, err = paths.ExpandPath(scanDir); err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl adopt: resolve --path: %v\n", err)
-		return ExitUsage
+		return failHint("adopt", err, ExitUsage, `pass an absolute directory path`)
 	}
 
 	// One renderer per run: progress on stderr, stdout untouched. "bfctl
@@ -113,15 +111,13 @@ func runAdopt(args []string, bi BuildInfo) int {
 	// the summary print on the quiet terminal.
 	prog.Stop()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl adopt: %v\n", err)
-		return ExitError
+		return failHint("adopt", err, ExitError, fmt.Sprintf("check that %s is a readable AddOns directory", scanDir))
 	}
 	printAdoptReport(rep, flavor, !*yesFlag)
 
 	if *yesFlag {
 		if err := persistAdopt(flavor, rep); err != nil {
-			fmt.Fprintf(os.Stderr, "bfctl adopt: %v\n", err)
-			return ExitError
+			return fail("adopt", err, ExitError)
 		}
 		fmt.Printf("\nrecorded %d entr%s for %s in the state\n",
 			adoptCount(rep), plural(adoptCount(rep), "y", "ies"), flavor)
@@ -228,7 +224,7 @@ const stateLockTimeout = 5 * time.Second
 func persistAdopt(flavor client.Flavor, rep *adopt.Report) error {
 	statePath, err := paths.StateFile()
 	if err != nil {
-		return err
+		return withHint(err, hintHome)
 	}
 	store := state.Open(statePath)
 	lock, err := store.Lock(stateLockTimeout)
@@ -238,7 +234,7 @@ func persistAdopt(flavor client.Flavor, rep *adopt.Report) error {
 	defer func() { _ = lock.Unlock() }()
 	st, err := store.Load()
 	if err != nil {
-		return err
+		return withHint(err, hintStateFile)
 	}
 	if err := adopt.Persist(st, flavor, rep); err != nil {
 		return err

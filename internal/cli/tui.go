@@ -17,13 +17,12 @@ func runTUI(args []string, bi BuildInfo) int {
 		return code
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "bfctl tui: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(os.Stderr, "bfctl tui: unexpected argument %q — usage: bfctl tui [flags]\n", fs.Arg(0))
 		subcommandUsage(fs)
 		return ExitUsage
 	}
 	if err := tui.Run(tui.Options{Version: bi.Version, ASCII: *ascii}); err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl tui: %v\n", err)
-		return ExitError
+		return fail("tui", err, ExitError)
 	}
 	return ExitOK
 }

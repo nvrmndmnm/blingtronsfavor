@@ -130,6 +130,42 @@ func classifyStatus(word string) statusClass {
 	}
 }
 
+// classColor returns the shared status color for a semantic class: ANSI
+// base colors so every profile downgrade keeps the meaning. It is the one
+// definition both the TUI theme and "bfctl status" decorate status words
+// with, so the surfaces can never drift apart.
+func classColor(c statusClass, colorOn bool) color.Color {
+	if !colorOn {
+		return lipgloss.NoColor{}
+	}
+	switch c {
+	case statusGood:
+		return lipgloss.ANSIColor(2) // green
+	case statusWarn:
+		return lipgloss.ANSIColor(3) // yellow
+	case statusBad:
+		return lipgloss.ANSIColor(1) // red
+	}
+	return lipgloss.NoColor{}
+}
+
+// ColorizeStatus decorates one status word with the shared status color
+// language: the same classification (classifyStatus) and the same colors
+// (classColor) the TUI table colors its Status cells with, exported so
+// "bfctl status" shows its status cells the same way on a terminal. With
+// color disabled the word is returned untouched — the words always carry
+// the meaning, color only reinforces it (R4).
+func ColorizeStatus(word string, colorOn bool) string {
+	if !colorOn {
+		return word
+	}
+	class := classifyStatus(word)
+	if class == statusNeutral {
+		return lipgloss.NewStyle().Faint(true).Render(word)
+	}
+	return lipgloss.NewStyle().Foreground(classColor(class, true)).Render(word)
+}
+
 // theme is the resolved visual language: the glyph set plus the semantic
 // styles. It is plain data, chosen once at startup from the terminal
 // capabilities, so rendering stays a pure function of state + theme + size.
@@ -176,17 +212,14 @@ func newTheme(c caps) theme {
 		th.box = lipgloss.RoundedBorder()
 		th.rule = "│"
 	}
-	accent, good, warn, bad := color.Color(lipgloss.NoColor{}), color.Color(lipgloss.NoColor{}), color.Color(lipgloss.NoColor{}), color.Color(lipgloss.NoColor{})
+	accent := color.Color(lipgloss.NoColor{})
 	if c.color {
 		accent = lipgloss.ANSIColor(6) // cyan
-		good = lipgloss.ANSIColor(2)   // green
-		warn = lipgloss.ANSIColor(3)   // yellow
-		bad = lipgloss.ANSIColor(1)    // red
 	}
 	th.accent = th.title.Foreground(accent).Bold(true)
-	th.good = lipgloss.NewStyle().Foreground(good)
-	th.warn = lipgloss.NewStyle().Foreground(warn)
-	th.bad = lipgloss.NewStyle().Foreground(bad)
+	th.good = lipgloss.NewStyle().Foreground(classColor(statusGood, c.color))
+	th.warn = lipgloss.NewStyle().Foreground(classColor(statusWarn, c.color))
+	th.bad = lipgloss.NewStyle().Foreground(classColor(statusBad, c.color))
 	return th
 }
 
