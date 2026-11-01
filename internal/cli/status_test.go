@@ -36,13 +36,13 @@ func TestStatusPlainTableMatchesTabwriter(t *testing.T) {
 
 	var table strings.Builder
 	tw := tabwriter.NewWriter(&table, 0, 4, tablePad, ' ', 0)
-	fmt.Fprintln(tw, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
+	_, _ = fmt.Fprintln(tw, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
 	for _, a := range cs.Addons {
 		dirs := "-"
 		if len(a.Dirs) > 0 {
 			dirs = strings.Join(a.Dirs, ", ")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Installed, a.Strategy, dirs, a.Status, a.Upstream)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Installed, a.Strategy, dirs, a.Status, a.Upstream)
 	}
 	_ = tw.Flush()
 	want := fmt.Sprintf("%s (Interface %d) — %s\n%s", cs.FlavorName, cs.Interface, cs.Root, table.String())
