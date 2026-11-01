@@ -43,6 +43,10 @@ type ptyFixture struct {
 // land inside the block) instead of a buffer.
 func newPTYFixture(t *testing.T, cols, rows int, stdoutTTY bool) (*ttyProgress, *ptyFixture) {
 	t.Helper()
+	// Pin a UTF-8 locale: the spinner frames are the braille set on UTF-8
+	// terminals and the ASCII fallback otherwise, and a container with no
+	// locale set must not decide which set these geometry assertions see.
+	t.Setenv("LC_ALL", "C.UTF-8")
 	freezeSpinner(t)
 	p := openPTY(t, cols, rows)
 	f := &ptyFixture{pty: p, screen: newVTScreen(cols, rows), captured: &bytes.Buffer{}}
