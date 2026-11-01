@@ -34,6 +34,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	flavorFlag := fs.String("flavor", "", "client flavor to install for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
 	forceFlag := fs.Bool("force", false, "take over addon directories owned by another addon")
 	explainFlag := fs.Bool("explain", false, "show why the plan was selected")
+	progress := registerProgressFlag(fs)
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -78,7 +79,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	// One renderer per run: progress on stderr, stdout untouched. "bfctl
 	// add" has no graceful SIGINT path, so the guard only restores the
 	// terminal before the process dies exactly as it otherwise would.
-	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "adding"})
+	prog := newProgressRenderer(os.Stderr, progressOptions{Mode: *progress, Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "adding"})
 	defer prog.Stop()
 	defer interruptGuard(prog)()
 	opts := service.AddOptions{Tracking: tracking, Force: *forceFlag, OnProgress: prog.Handle}

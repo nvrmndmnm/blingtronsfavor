@@ -56,6 +56,7 @@ func runAdopt(args []string, bi BuildInfo) int {
 	flavorFlag := fs.String("flavor", "", "client flavor to adopt for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
 	binds := bindFlags{}
 	fs.Var(binds, "bind", "bind one folder explicitly as folder=owner/repo or folder=cfwidget:<projectId> (repeatable)")
+	progress := registerProgressFlag(fs)
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -96,7 +97,7 @@ func runAdopt(args []string, bi BuildInfo) int {
 	// One renderer per run: progress on stderr, stdout untouched. "bfctl
 	// adopt" has no graceful SIGINT path, so the guard only restores the
 	// terminal before the process dies exactly as it otherwise would.
-	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "adopting"})
+	prog := newProgressRenderer(os.Stderr, progressOptions{Mode: *progress, Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "adopting"})
 	defer prog.Stop()
 	defer interruptGuard(prog)()
 

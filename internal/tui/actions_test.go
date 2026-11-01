@@ -100,18 +100,23 @@ func TestRefreshKeyReloadsSnapshotAndStamp(t *testing.T) {
 	}
 }
 
-func TestCheckPreviewShowsWhatWouldChange(t *testing.T) {
+// TestCheckPreviewUsesTheSharedResultLabels pins the check-only preview
+// on the shared result vocabulary (the UX contract in docs/bfctl.1): the
+// available update settles as "update available" ("available to install"
+// with nothing installed), and what would change stays in the row's
+// Installed/Upstream columns and the frozen result line.
+func TestCheckPreviewUsesTheSharedResultLabels(t *testing.T) {
 	m := testModel(t)
 	m.results["DemoAddon"] = service.Result{Kind: service.ResultAvailable, From: "12.1.17", To: "12.1.18"}
 	m.refreshRows()
-	if got := rowText(t, m, "DemoAddon"); got != "update 12.1.17 → 12.1.18" {
-		t.Fatalf("status = %q, want the planned update", got)
+	if got := rowText(t, m, "DemoAddon"); got != "update available" {
+		t.Fatalf("status = %q, want the update-available label", got)
 	}
 
 	m.results["DemoAddon"] = service.Result{Kind: service.ResultAvailable, From: "-", To: "2.0.0"}
 	m.refreshRows()
-	if got := rowText(t, m, "DemoAddon"); got != "update → 2.0.0" {
-		t.Fatalf("status = %q, want the planned update without a known installed version", got)
+	if got := rowText(t, m, "DemoAddon"); got != "available to install" {
+		t.Fatalf("status = %q, want the available-to-install label", got)
 	}
 }
 

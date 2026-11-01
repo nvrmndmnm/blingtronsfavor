@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -47,9 +48,59 @@ type progressRenderer interface {
 	Stop()
 }
 
+// progressMode names the explicit rendering mode "--progress" selects.
+// The zero value is auto — today's selection untouched — and the other
+// modes force one renderer whatever the streams look like, so a script can
+// pin the presentation: live draws the block even off a terminal, plain
+// streams the incremental lines even on one, and none silences progress
+// entirely. An explicit mode overrides "--quiet" for progress rendering
+// ("--quiet" still raises the log threshold); the vocabulary itself never
+// changes with the mode (the UX contract in docs/bfctl.1).
+type progressMode int
+
+const (
+	progressAuto progressMode = iota
+	progressLive
+	progressPlain
+	progressNone
+)
+
+// progressModeWords is the "--progress" vocabulary, in the order the usage
+// text lists the values.
+var progressModeWords = []string{"auto", "live", "plain", "none"}
+
+func (m progressMode) String() string {
+	if m < 0 || int(m) >= len(progressModeWords) {
+		return progressModeWords[0]
+	}
+	return progressModeWords[m]
+}
+
+// Set implements flag.Value for "--progress=auto|live|plain|none".
+func (m *progressMode) Set(s string) error {
+	for i, word := range progressModeWords {
+		if s == word {
+			*m = progressMode(i)
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown progress mode %q (want auto, live, plain or none)", s)
+}
+
+// registerProgressFlag adds "--progress" to a progress-reporting
+// subcommand's flag set and returns the parsed mode (auto unless set).
+func registerProgressFlag(fs *flag.FlagSet) *progressMode {
+	m := new(progressMode)
+	fs.Var(m, "progress", "progress rendering: auto (default; TTY detection), live, plain or none")
+	return m
+}
+
 // progressOptions are the run-mode facts that pick the renderer once per
-// run. Only two of them change the selection:
+// run:
 //
+//   - Mode is the explicit "--progress" selection. Anything but auto picks
+//     that renderer outright; auto is today's behavior, chosen from Quiet
+//     and TTY exactly as before.
 //   - Quiet suppresses progress entirely ("--quiet"): errors still surface
 //     in the final summary and the exit code.
 //   - TTY is the stderr stream's own terminal bit, detected independently
@@ -68,6 +119,7 @@ type progressRenderer interface {
 // buffer to observe the frozen result lines independently of the terminal
 // stream.
 type progressOptions struct {
+	Mode   progressMode
 	Quiet  bool
 	TTY    bool
 	Verb   string
@@ -76,11 +128,20 @@ type progressOptions struct {
 
 // newProgressRenderer selects the progress renderer for one run. The
 // choice is made exactly once here; flows just forward events and defer
-// Stop.
+// Stop. An explicit --progress mode picks the renderer outright; auto
+// falls through to the historical Quiet/TTY selection unchanged.
 func newProgressRenderer(w io.Writer, opts progressOptions) progressRenderer {
 	out := opts.Stdout
 	if out == nil {
 		out = os.Stdout
+	}
+	switch opts.Mode {
+	case progressNone:
+		return quietProgress{out: out}
+	case progressLive:
+		return newTTYProgress(w, out, opts.Verb)
+	case progressPlain:
+		return &plainProgress{w: w, out: out}
 	}
 	switch {
 	case opts.Quiet:

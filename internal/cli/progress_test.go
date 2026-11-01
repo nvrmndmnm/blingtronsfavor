@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	"github.com/charmbracelet/x/ansi"
@@ -603,5 +604,144 @@ func TestScreenAdvance(t *testing.T) {
 				t.Errorf("screenAdvance(%q, %d) = %d, want %d", tt.text, tt.width, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestProgressModeFlagParsesTheModeVocabulary pins the --progress values
+// (XD-48): auto, live, plain and none are accepted, anything else is a
+// usage error naming the vocabulary.
+func TestProgressModeFlagParsesTheModeVocabulary(t *testing.T) {
+	fs := subcommandFlagSet("sync")
+	mode := registerProgressFlag(fs)
+	if err := fs.Parse([]string{"--progress=plain"}); err != nil {
+		t.Fatalf("parse --progress=plain: %v", err)
+	}
+	if *mode != progressPlain {
+		t.Fatalf("mode = %v, want plain", *mode)
+	}
+	for word, want := range map[string]progressMode{"auto": progressAuto, "live": progressLive, "plain": progressPlain, "none": progressNone} {
+		if err := mode.Set(word); err != nil {
+			t.Fatalf("--progress=%s rejected: %v", word, err)
+		}
+		if *mode != want {
+			t.Fatalf("--progress=%s set mode %v, want %v", word, *mode, want)
+		}
+	}
+	err := mode.Set("bogus")
+	if err == nil {
+		t.Fatal("--progress=bogus must be a usage error")
+	}
+	for _, want := range []string{"bogus", "auto, live, plain or none"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("usage error %q is missing %q", err, want)
+		}
+	}
+}
+
+// TestProgressModeMatrix pins the --progress matrix (XD-48): none is
+// silent whatever the streams look like (the result lines still reach
+// stdout), plain streams the incremental lines even on a terminal, live
+// draws the block even off one, and auto keeps today's behavior bit for
+// bit — the exact bytes the historical Quiet/TTY selection produced when
+// no --progress is passed.
+func TestProgressModeMatrix(t *testing.T) {
+	defer func(fps time.Duration) { ttySpinFPS = fps }(ttySpinFPS)
+	ttySpinFPS = time.Hour // no spinner tick: every render is deterministic
+
+	unit := service.Unit{Flavor: client.Flavor("forever"), AddonID: "DeadlyBossMods"}
+	const result = "forever/DeadlyBossMods: up to date (12.1.18)\n"
+	run := func(mode progressMode, quiet, tty bool) (term, out string) {
+		var termBuf, outBuf bytes.Buffer
+		r := newProgressRenderer(&termBuf, progressOptions{Mode: mode, Quiet: quiet, TTY: tty, Verb: "syncing", Stdout: &outBuf})
+		r.Handle(stepEvent(1, 2, "forever/DeadlyBossMods", service.PhaseResolving, service.Detail{}))
+		r.Handle(stepEvent(1, 2, "forever/DeadlyBossMods", service.PhaseDone, service.Detail{Version: "12.1.18"}))
+		r.Print(unit, result)
+		r.Stop()
+		return termBuf.String(), outBuf.String()
+	}
+
+	t.Run("none is silent on a terminal", func(t *testing.T) {
+		term, out := run(progressNone, false, true)
+		if term != "" {
+			t.Errorf("progress display wrote %q, want silence", term)
+		}
+		if out != result {
+			t.Errorf("stdout = %q, want the frozen result line untouched", out)
+		}
+	})
+	t.Run("plain on a terminal", func(t *testing.T) {
+		term, _ := run(progressPlain, false, true)
+		assertNoControlBytes(t, []byte(term))
+		if !strings.Contains(term, "progress: 1/2 forever/DeadlyBossMods: resolving") ||
+			!strings.Contains(term, "progress: 1/2 forever/DeadlyBossMods: done: 12.1.18") {
+			t.Errorf("plain mode lost the incremental lines: %q", term)
+		}
+	})
+	t.Run("live off a terminal", func(t *testing.T) {
+		term, _ := run(progressLive, false, false)
+		if !strings.Contains(term, "syncing: 1/2 forever/DeadlyBossMods: resolving") ||
+			!strings.Contains(term, "done: 1/2 forever/DeadlyBossMods: 12.1.18") {
+			t.Errorf("live mode lost the block rows: %q", term)
+		}
+	})
+	t.Run("an explicit mode overrides --quiet", func(t *testing.T) {
+		term, _ := run(progressPlain, true, true)
+		if !strings.Contains(term, "progress: 1/2 forever/DeadlyBossMods: resolving") {
+			t.Errorf("--quiet suppressed an explicit --progress=plain: %q", term)
+		}
+	})
+	t.Run("auto matches today's behavior bit for bit", func(t *testing.T) {
+		// At the default (no --progress) the renderer is today's: a
+		// terminal gets the live block, a pipe gets the plain lines and
+		// --quiet gets silence — byte for byte the explicit mode each of
+		// those stream facts maps to.
+		for _, tc := range []struct {
+			name       string
+			quiet, tty bool
+			want       progressMode
+		}{
+			{"terminal", false, true, progressLive},
+			{"pipe", false, false, progressPlain},
+			{"quiet", true, true, progressNone},
+		} {
+			autoTerm, autoOut := run(progressAuto, tc.quiet, tc.tty)
+			wantTerm, wantOut := run(tc.want, tc.quiet, tc.tty)
+			if autoTerm != wantTerm || autoOut != wantOut {
+				t.Errorf("%s: auto renders differ from --progress=%s", tc.name, tc.want)
+			}
+		}
+	})
+}
+
+// TestPhaseLabelsAreTheServicePhaseWords pins the progress vocabulary on
+// the CLI side (the UX contract in docs/bfctl.1): every live row, terminal
+// row and pipe line is labeled by the service.Phase word itself — the same
+// strings the TUI renders for the same states, so the two surfaces cannot
+// drift apart.
+func TestPhaseLabelsAreTheServicePhaseWords(t *testing.T) {
+	for _, p := range []service.Phase{service.PhaseResolving, service.PhaseDownloading, service.PhaseInstalling, service.PhaseDone, service.PhaseFailed, service.PhaseSkipped} {
+		ev := progressEvent(p, service.Detail{})
+		if got := liveStepLine("syncing", ev); !strings.Contains(got, ": "+string(p)) {
+			t.Errorf("liveStepLine(%s) = %q, want the phase word %q", p, got, p)
+		}
+		if got := progressLine(ev); !strings.Contains(got, ": "+string(p)) {
+			t.Errorf("progressLine(%s) = %q, want the phase word %q", p, got, p)
+		}
+	}
+	for _, p := range []service.Phase{service.PhaseDone, service.PhaseFailed, service.PhaseSkipped} {
+		if got := terminalStepLine(progressEvent(p, service.Detail{})); !strings.HasPrefix(got, string(p)+": ") {
+			t.Errorf("terminalStepLine(%s) = %q, want the phase word %q as its label", p, got, p)
+		}
+	}
+}
+
+// TestSyncVerbSharesTheTUIVocabulary pins the flow verbs: a check-only run
+// works under "checking", the same verb the TUI's check preview uses.
+func TestSyncVerbSharesTheTUIVocabulary(t *testing.T) {
+	if got := syncVerb(false); got != "syncing" {
+		t.Errorf("syncVerb(false) = %q, want %q", got, "syncing")
+	}
+	if got := syncVerb(true); got != "checking" {
+		t.Errorf("syncVerb(true) = %q, want %q", got, "checking")
 	}
 }

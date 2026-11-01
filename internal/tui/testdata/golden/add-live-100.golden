@@ -1,11 +1,11 @@
 [1;38;5;6mForever[m [1m1.60.1[m · [2m/games/World of Warcraft/_forever_[m    [2mchecked 15:04[m · 5 addons · [38;5;3m1 update available[m
 [1m▲ Addon                          [m[1mInstalled[m[1mUpstream [m[1mStrategy   [m[1mStatus                      [m          
- auctionator                        341        342        GH-Release   [38;5;3m⚠ update 342[m                 
+ auctionator                        341        342        GH-Release   [38;5;3m⚠ update available[m           
  [1;38;5;6mDeadlyBossMods[m                     [1;38;5;6m12.1.17[m    [1;38;5;6m12.1.17[m    [1;38;5;6mGH-Release[m   [1;38;5;2m✓ up to date[m                 
  Details-Damage-Meter               d1e8ad72   -          Direct       [38;5;2m✓ updated d1e8ad72 → f00ba4…[m 
  NewAddon                           -          -          -            [2m⣽ installing[m                 
  rarescanner                        1.60.1.b1  1.60.1.b2  Direct       [38;5;1m✗ failed[m                     
- WeakAuras                          5.19.5     5.19.5     Git-Pkgmeta  [2m… manual[m                     
+ WeakAuras                          5.19.5     5.19.5     Git-Pkgmeta  [2m… skipped[m                    
                                                                                                     
                                                                                                     
                                                                                                     

@@ -312,11 +312,16 @@ func (m *Model) statusText(a service.AddonRow) string {
 	return a.Status
 }
 
-// outcomeText renders one decided outcome in the CLI live block's words:
-// "up to date", "updated 12.1.17 → 12.1.18", "failed: <reason>". A
-// check-only preview renders what would change — "update 12.1.17 →
-// 12.1.18" ("update → 12.1.18" with nothing installed) — and touches
-// nothing.
+// outcomeText renders one decided outcome in the shared result
+// vocabulary (the UX contract in docs/bfctl.1) — one label per outcome,
+// the words the CLI live block's settled rows carry too: "up to date",
+// "updated 12.1.17 → 12.1.18", "installed 342", "update available",
+// "available to install", "skipped: <reason>", "failed: <error>". The
+// cell carries the label and only the detail its phrase needs (the update
+// transition, the error, the skip reason); the versions behind "up to
+// date" and "update available" live in the Installed and Upstream columns
+// and in the frozen result line. A check-only preview settles on the
+// "update available" family and touches nothing.
 func (m Model) outcomeText(r service.Result) string {
 	switch r.Kind {
 	case service.ResultUpdated:
@@ -327,15 +332,15 @@ func (m Model) outcomeText(r service.Result) string {
 	case service.ResultUpToDate:
 		return "up to date"
 	case service.ResultAvailable:
-		switch r.From {
-		case "-":
-			return "update " + m.theme.g.Arrow + " " + r.To
-		case "":
-			return "update " + r.To
+		if r.From == "-" {
+			return "available to install"
 		}
-		return "update " + r.From + " " + m.theme.g.Arrow + " " + r.To
+		return "update available"
 	case service.ResultSkipped:
-		return "manual"
+		if r.Skip != "" {
+			return "skipped: " + clean(r.Skip)
+		}
+		return "skipped"
 	case service.ResultFailed:
 		s := "failed"
 		if r.Err != nil {
@@ -346,27 +351,27 @@ func (m Model) outcomeText(r service.Result) string {
 	return ""
 }
 
-// terminalText renders a terminal event in the CLI live block's words —
-// "done: 12.1.18", "failed: <error>", "skipped: <reason>" — until the
-// decided outcome lands in the row.
+// terminalText renders a terminal event in the shared phase vocabulary —
+// the label is the phase word itself ("done", "failed", "skipped": the
+// same string the CLI live block and the pipe lines print) plus the
+// outcome detail — until the decided outcome lands in the row.
 func terminalText(l liveRow) string {
+	label := string(l.phase)
 	switch l.phase {
 	case service.PhaseFailed:
 		if l.detail.Err != nil {
-			return "failed: " + clean(l.detail.Err.Error())
+			return label + ": " + clean(l.detail.Err.Error())
 		}
-		return "failed"
 	case service.PhaseSkipped:
 		if l.detail.Reason != "" {
-			return "skipped: " + clean(l.detail.Reason)
+			return label + ": " + clean(l.detail.Reason)
 		}
-		return "skipped"
 	default:
 		if l.detail.Version != "" {
-			return "done: " + clean(l.detail.Version)
+			return label + ": " + clean(l.detail.Version)
 		}
-		return "done"
 	}
+	return label
 }
 
 // resultFor returns the addon's sync outcome: the running sync's decided
@@ -441,11 +446,18 @@ func (m Model) detailPageSize() int {
 func (m *Model) counts() (total, updates int) {
 	total = len(m.client.Addons)
 	for _, a := range m.client.Addons {
-		if strings.HasPrefix(m.statusText(a), "update ") {
+		if offersUpdate(m.statusText(a)) {
 			updates++
 		}
 	}
 	return total, updates
+}
+
+// offersUpdate reports whether a status word names an available update —
+// the "update available" result family ("update available" or
+// "available to install") — for the header's update tally.
+func offersUpdate(word string) bool {
+	return strings.HasPrefix(word, "update ") || strings.HasSuffix(word, "available to install")
 }
 
 // selected returns the addon the table cursor points at, or nil.

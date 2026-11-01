@@ -142,7 +142,7 @@ func TestASCIIModeDegradesAllGlyphs(t *testing.T) {
 		}
 	}
 	// The ASCII status glyphs carry their words.
-	for _, want := range []string{"+ up to date", "! update 342", "x failed", "* manual", "+ updated"} {
+	for _, want := range []string{"+ up to date", "! update available", "x failed", "* skipped", "+ updated"} {
 		if !strings.Contains(m.View().Content, want) {
 			t.Errorf("ASCII mode: frame is missing %q", want)
 		}
@@ -154,7 +154,7 @@ func TestColorNeverCarriesMeaningAlone(t *testing.T) {
 		m := viewTest(t, c, 100, 28, viewRows())
 		m.results = viewResults()
 		content := m.View().Content
-		for _, want := range []string{"up to date", "update 342", "failed", "manual"} {
+		for _, want := range []string{"up to date", "update available", "failed", "skipped"} {
 			if !strings.Contains(content, want) {
 				t.Errorf("caps %+v: frame is missing the status word %q", c, want)
 			}
@@ -198,7 +198,7 @@ func TestStatusCellCarriesGlyphAndWord(t *testing.T) {
 	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, viewRows())
 	m.results = viewResults()
 	content := m.View().Content
-	for _, want := range []string{"✓ up to date", "⚠ update 342", "✗ failed", "… manual"} {
+	for _, want := range []string{"✓ up to date", "⚠ update available", "✗ failed", "… skipped"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("frame is missing %q", want)
 		}

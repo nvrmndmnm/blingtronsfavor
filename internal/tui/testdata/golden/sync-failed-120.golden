@@ -3,7 +3,7 @@
  DeadlyBossMods      12.1.17    12.1.17   GH-Release  [38;5;2m✓ up to date[m            │                                         
  [1;38;5;6mauctionator[m         [1;38;5;6m341[m        [1;38;5;6m342[m       [1;38;5;6mGH-Release[m  [1;38;5;2m✓ updated 341 → 342[m     │ [2mSource   [m  [2mowner/auction (github)[m       
  rarescanner         1.60.1.b1  1.60.1.…  Direct      [38;5;1m✗ failed: download fai…[m │ [2mTracking [m  [2mstable[m                       
- WeakAuras           5.19.5     5.19.5    Git-Pkgme…  [2m… manual[m                │ [2mStrategy [m  [2mGH-Release[m                   
+ WeakAuras           5.19.5     5.19.5    Git-Pkgme…  [2m… skipped: manual addon[m │ [2mStrategy [m  [2mGH-Release[m                   
  Details-Damage-Me…  d1e8ad72   -         Direct      [38;5;1m✗ failed: no compatibl…[m │ [2mInstalled[m  [2m341[m                          
                                                                               │ [2mUpstream [m  [2m342[m                          
                                                                               │ [2mStatus   [m  [38;5;2m✓ updated 341 → 342[m          
