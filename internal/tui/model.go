@@ -84,7 +84,7 @@ type Model struct {
 	syncFn func(context.Context, service.SyncOptions, func(service.Result), service.ProgressFunc) (service.Report, error)
 
 	status service.Status
-	client service.ClientRow
+	client service.ClientRow  // the active client flavor's row — the one the table shows
 	rows   []service.AddonRow // visible rows, in table order
 	table  table.Model
 	spin   spinner.Model
@@ -179,20 +179,56 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	} else {
 		m.statusLine = "error: " + err.Error()
 	}
+	m.armClientSwitch()
 	m.pickClient()
 	m.refreshRows()
 	return m
 }
 
-// pickClient selects the client the table shows: the first recorded client
-// (sorted by flavor). With no client the table is empty and the view shows
-// the empty state.
+// armClientSwitch arms the client-switch keys (tab / [ ]) only when
+// several clients are configured — single-client configurations keep
+// exactly the keys and the help they have today (P2-1 acceptance).
+func (m *Model) armClientSwitch() {
+	m.keys.Client.SetEnabled(len(m.status.Clients) > 1)
+}
+
+// pickClient selects the client the table shows: the active flavor. The
+// active flavor survives snapshot reloads — a refresh keeps showing the
+// flavor the user switched to — and falls back to the first recorded
+// client (sorted by flavor) when it is gone or none was picked yet. With
+// no client the table is empty and the view shows the empty state.
 func (m *Model) pickClient() {
 	if len(m.status.Clients) == 0 {
 		m.client = service.ClientRow{}
 		return
 	}
+	for _, c := range m.status.Clients {
+		if c.Flavor == m.client.Flavor {
+			m.client = c
+			return
+		}
+	}
 	m.client = m.status.Clients[0]
+}
+
+// switchClient moves the active flavor to the delta-th next configured
+// client (wrapping around the list) and reloads the table for it. The
+// recorded sync outcomes and the add flow's provisional row belong to the
+// client that was showing — they are dropped with it, so a table only ever
+// carries its own client's state — and the selection starts at the top of
+// the new list. The header names the new active flavor.
+func (m *Model) switchClient(delta int) {
+	n := len(m.status.Clients)
+	if n == 0 {
+		return
+	}
+	m.client = m.status.Clients[((m.activeClientIndex()+delta)%n+n)%n]
+	m.table.SetCursor(0)
+	m.detailScroll = 0
+	m.results = map[string]service.Result{}
+	m.addRow = nil
+	m.refreshRows()
+	m.statusLine = "switched to " + m.clientLabel()
 }
 
 // activeClientIndex is the position of the active client in the status

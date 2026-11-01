@@ -8,11 +8,17 @@ import (
 //
 //	u update all · a add · U update one · c check · r refresh ·
 //	s toggle release/branch · d delete (confirm) ·
-//	enter detail pane · / filter (esc clears) · o sort · ? help · q quit
+//	enter detail pane · / filter (esc clears) · o sort ·
+//	tab / [ ] switch client · ? help · q quit
 //
 // q and ctrl+c are deliberately split (R2): q quits — asking first while a
 // run is in flight, never silently cancelling — while ctrl+c cancels the
 // running sync and then offers quit.
+//
+// The client switch is armed only when several clients are configured
+// (P2-1): disabled it matches nothing and bubbles' help drops it, so a
+// single-client configuration sees exactly the keys and the help it has
+// always seen.
 //
 // It also satisfies bubbles' help.KeyMap: ShortHelp renders the compact
 // bottom bar, FullHelp groups the bindings, and helpSections gives the
@@ -25,6 +31,7 @@ type keyMap struct {
 	Detail    key.Binding
 	Filter    key.Binding
 	Sort      key.Binding
+	Client    key.Binding
 	Update    key.Binding
 	Add       key.Binding
 	UpdateOne key.Binding
@@ -48,6 +55,7 @@ func newKeyMap(g glyphs) keyMap {
 		Detail:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "detail")),
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Sort:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
+		Client:    key.NewBinding(key.WithKeys("tab", "[", "]"), key.WithHelp("tab/[ ]", "switch client"), key.WithDisabled()),
 		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
 		Add:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
 		UpdateOne: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update one")),
@@ -63,16 +71,19 @@ func newKeyMap(g glyphs) keyMap {
 	}
 }
 
-// ShortHelp renders the compact bottom help bar.
+// ShortHelp renders the compact bottom help bar. The client switch sits
+// just before the pinned help and quit keys: when the bar cannot hold
+// every entry it drops first — the ? overlay always lists it.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete, k.Detail, k.Filter, k.Sort, k.Help, k.Quit}
+	return []key.Binding{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Client, k.Delete, k.Detail, k.Filter, k.Sort, k.Help, k.Quit}
 }
 
 // FullHelp groups the bindings for the full help: navigation (with the
-// detail pane's scroll keys), the actions, and the help/quit pair.
+// detail pane's scroll keys and the client switch), the actions, and the
+// help/quit pair.
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.PgUp, k.PgDn, k.Detail, k.Filter, k.Sort},
+		{k.Up, k.Down, k.PgUp, k.PgDn, k.Detail, k.Filter, k.Sort, k.Client},
 		{k.Update, k.Add, k.UpdateOne, k.Check, k.Refresh, k.Track, k.Delete},
 		{k.Help, k.Quit, k.Interrupt},
 	}
@@ -100,14 +111,22 @@ func bindingRow(kb key.Binding) helpRow {
 // the target-flavor prompt, the confirmations, and the keys that act on a
 // running sync.
 func (k keyMap) helpSections() []helpSection {
+	list := []helpRow{
+		bindingRow(k.Up), bindingRow(k.Down), bindingRow(k.PgUp), bindingRow(k.PgDn),
+		bindingRow(k.Detail), bindingRow(k.Filter), bindingRow(k.Sort),
+	}
+	// The client switch is listed only where it exists: several clients
+	// configured (its binding is disabled otherwise).
+	if k.Client.Enabled() {
+		list = append(list, bindingRow(k.Client))
+	}
+	list = append(list,
+		bindingRow(k.Update), bindingRow(k.Add), bindingRow(k.UpdateOne), bindingRow(k.Check),
+		bindingRow(k.Refresh), bindingRow(k.Track), bindingRow(k.Delete),
+		bindingRow(k.Help), bindingRow(k.Quit), bindingRow(k.Interrupt),
+	)
 	return []helpSection{
-		{title: "the list", rows: []helpRow{
-			bindingRow(k.Up), bindingRow(k.Down), bindingRow(k.PgUp), bindingRow(k.PgDn),
-			bindingRow(k.Detail), bindingRow(k.Filter), bindingRow(k.Sort),
-			bindingRow(k.Update), bindingRow(k.Add), bindingRow(k.UpdateOne), bindingRow(k.Check),
-			bindingRow(k.Refresh), bindingRow(k.Track), bindingRow(k.Delete),
-			bindingRow(k.Help), bindingRow(k.Quit), bindingRow(k.Interrupt),
-		}},
+		{title: "the list", rows: list},
 		{title: "filter input", rows: []helpRow{
 			{"typing", "narrows the list"},
 			{"backspace", "erase"},
