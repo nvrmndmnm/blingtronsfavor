@@ -15,6 +15,8 @@ import (
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/service"
 )
 
@@ -121,10 +123,21 @@ type Model struct {
 	checkedAt     time.Time                 // when the snapshot was last loaded ("checked 14:32")
 	pendingFlavor string                    // flavor to show once the next snapshot lands (after an add)
 	quitting      bool
+
+	// Guided init (A6): the screen shown while no client is configured —
+	// the detected-install picker and its inline manual path prompt.
+	picker       []client.ClientInstall // detected installs the picker offers
+	pickerCursor int                    // picker row: an install, or the manual-path entry
+	pathInput    bool                   // manual path prompt active
+	pathText     string                 // the flavor directory being typed
+	pathInstall  *client.ClientInstall  // live detection of pathText, nil while it does not detect
+	pathErr      error                  // live detection error while pathText is set
 }
 
 // NewModel builds the initial model and loads the status synchronously so
-// the first frame already has rows.
+// the first frame already has rows. With no client configured the model
+// arms the guided init instead: the detected installs fill the picker, and
+// with nothing detected the inline path prompt takes over right away (A6).
 func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	if rt == nil {
 		rt = &runtime{}
@@ -174,13 +187,18 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	}
 	if st, err := service.LoadStatus(); err == nil {
 		m.status = st
-		m.statusLine = fmt.Sprintf("ready %s q quits, u updates all", th.g.Dash)
 		m.checkedAt = time.Now()
 	} else {
 		m.statusLine = "error: " + err.Error()
 	}
 	m.pickClient()
 	m.refreshRows()
+	if len(m.status.Clients) == 0 {
+		m.picker = detectInstalls()
+		if len(m.picker) == 0 {
+			m.pathInput = true
+		}
+	}
 	return m
 }
 
@@ -287,6 +305,68 @@ func (m *Model) validateAdd() {
 	}
 	ref, err := service.ParseAddRef(m.addText)
 	m.addParsed, m.addErr = ref, err
+}
+
+// validatePath re-runs the install detection on the typed path — the same
+// client.Detect "bfctl init --path" validates with — keeping the inline
+// hint or error in step with the typing, the way validateAdd does for add
+// references.
+func (m *Model) validatePath() {
+	m.pathInstall, m.pathErr = nil, nil
+	if strings.TrimSpace(m.pathText) == "" {
+		return
+	}
+	path := m.pathText
+	if expanded, err := paths.ExpandPath(m.pathText); err == nil {
+		path = expanded
+	}
+	install, err := detectInstall(path)
+	m.pathInstall, m.pathErr = install, err
+}
+
+// tips returns the tip line's items: the three most useful keys for the
+// current state, cycling as the state moves between the inputs, the list
+// (nothing selected vs a row selected) and a run in flight (A6). They are
+// derived from the model on every render, never stored, so the advice can
+// never go stale. The words follow the help bar's terse "key verb" shape.
+func (m Model) tips() []string {
+	switch {
+	case m.confirm:
+		return []string{"y confirm", "esc cancel"}
+	case m.addInput:
+		return []string{"enter continue", "esc cancel", "backspace erase"}
+	case m.addChoose:
+		return []string{m.theme.g.UpDown + " pick", "enter add", "esc cancel"}
+	case m.filtering:
+		return []string{"enter apply", "esc clear", "backspace erase"}
+	case m.adding:
+		return []string{"esc cancel", "q quit"}
+	case m.syncing:
+		return []string{"ctrl+c cancel", "q quit"}
+	case len(m.status.Clients) == 0: // the guided-init screen
+		if m.pathInput {
+			esc := "esc back"
+			if len(m.picker) == 0 {
+				esc = "esc clear"
+			}
+			return []string{"enter set up", "backspace erase", esc}
+		}
+		return []string{m.theme.g.UpDown + " pick", "enter set up", "q quit"}
+	case m.filter != "" && len(m.rows) == 0:
+		return []string{"esc clear", "a add", "u sync"}
+	case len(m.rows) == 0: // configured, but zero addons
+		return []string{"a add", "u sync", "? help"}
+	case m.detailFocus: // a row is selected (the detail pane engages it)
+		return []string{"U update one", "s tracking", "d delete"}
+	default: // nothing selected: browsing the list
+		return []string{m.theme.g.UpDown + " select", "enter details", "u sync"}
+	}
+}
+
+// tipLine renders the tip line: the current state's tips joined the way
+// the help bar joins its entries.
+func (m Model) tipLine() string {
+	return strings.Join(m.tips(), " "+m.theme.g.MidDot+" ")
 }
 
 // statusText renders the Status cell — the addon's live row while a sync

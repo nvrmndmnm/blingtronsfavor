@@ -24,11 +24,11 @@ func (m Model) View() tea.View {
 // render composes the whole screen from the model state and the terminal
 // size — header bar, table with its detail pane, optional filter line, add
 // input and rate-limit wait line, then the status bar and the help bar as
-// separate zones. Every zone is sized by planScreen, so the composition
-// always fits the terminal and the status and help lines can never
-// overwrite each other.
+// separate zones. With no client configured it renders the guided-init
+// screen instead of the table (A6). Every zone is sized by planScreen, so
+// the composition always fits the terminal and the status and help lines
+// can never overwrite each other.
 func (m Model) render() string {
-	th := m.theme
 	w, h := m.width, m.height
 	if w <= 0 {
 		w = 80
@@ -44,16 +44,7 @@ func (m Model) render() string {
 	}
 
 	if len(m.status.Clients) == 0 {
-		lines := []string{
-			m.headerBar(w),
-			"",
-			th.dim.Render(fmt.Sprintf("no addons configured %s run \"bfctl init --path <root>\" first", th.g.Dash)),
-		}
-		for len(lines) < h-1 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, m.helpBar(w))
-		return fitBlock(strings.Join(lines, "\n"), w, h)
+		return fitBlock(m.onboardingScreen(w, h), w, h)
 	}
 
 	a := m.selected()
@@ -95,10 +86,15 @@ func (m Model) render() string {
 	m.table.SetWidth(plan.tableW)
 
 	body := fitBlock(m.table.View(), plan.tableW, plan.tableH)
-	if m.filter != "" && len(m.rows) == 0 {
+	switch {
+	case m.filter != "" && len(m.rows) == 0:
 		// Zero matches shows the empty state in place of the grid: it
 		// names the filter and suggests clearing it.
 		body = fitBlock(m.filterEmptyState(), plan.tableW, plan.tableH)
+	case m.filter == "" && m.addRow == nil && len(m.rows) == 0:
+		// Configured but zero addons: the hint panel instead of an empty
+		// grid (A6).
+		body = fitBlock(m.zeroAddonState(), plan.tableW, plan.tableH)
 	}
 	if plan.side {
 		body = joinBlocks(body, m.detailBlock(a, plan.detailW, plan.tableH))
@@ -404,6 +400,133 @@ func (m Model) filterEmptyState() string {
 		th.dim.Render("press esc to clear the filter")
 }
 
+// zeroAddonState renders the configured-but-zero-addons state in place of
+// the empty grid (A6): the hint panel that points at the keys that build
+// the collection — "press a to add, u to sync".
+func (m Model) zeroAddonState() string {
+	th := m.theme
+	return th.title.Render("no addons yet") + "\n" +
+		"\n" +
+		th.dim.Render("press a to add your first addon") + "\n" +
+		th.dim.Render("press u to sync") + "\n" +
+		th.dim.Render("refs: owner/repo, a wago.io or curseforge.com URL, or a git remote")
+}
+
+// onboardingScreen renders the guided-init screen shown instead of the
+// table while no client is configured (A6): the detected installs as a
+// picker — enter picks one and performs the init behind the scenes — or
+// the inline path prompt with its live detection hint, then the status
+// zone carrying the tip line and the onboarding help bar. With nothing
+// detected the prompt is the screen from the start.
+func (m Model) onboardingScreen(w, h int) string {
+	th := m.theme
+	lines := []string{m.headerBar(w), ""}
+	if m.pathInput {
+		lines = append(lines, th.title.Render("set up bfctl "+th.g.Dash+" enter your World of Warcraft flavor directory"))
+		lines = append(lines, "")
+		lines = append(lines, m.pathLine(w))
+		if m.pathText != "" {
+			lines = append(lines, m.pathHintLine(w))
+		}
+	} else {
+		lines = append(lines, th.title.Render("set up bfctl "+th.g.Dash+" pick your World of Warcraft install"))
+		lines = append(lines, "")
+		entries := m.pickerLines(w)
+		// With more entries than room the window follows the cursor, so
+		// the selection never scrolls out of sight.
+		room := maxInt(1, h-2-len(lines))
+		if len(entries) > room {
+			start := clampInt(m.pickerCursor-room+1, 0, len(entries)-room)
+			entries = entries[start : start+room]
+		}
+		lines = append(lines, entries...)
+	}
+	// The status and help bars keep their own bottom lines whatever the
+	// size: the content yields, never the bars.
+	if over := len(lines) - maxInt(0, h-2); over > 0 {
+		lines = lines[:maxInt(0, h-2)]
+	}
+	for len(lines) < h-2 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, m.statusBar(w))
+	lines = append(lines, m.onboardingHelp(w))
+	return strings.Join(lines, "\n")
+}
+
+// pickerLines renders the detected installs as picker rows — the flavor
+// badge and root path of each — plus the manual-path entry the picker
+// falls back to. The active row wears the accent and carries the "> "
+// marker, so the selection never depends on the color alone.
+func (m Model) pickerLines(width int) []string {
+	th := m.theme
+	lines := make([]string, 0, len(m.picker)+1)
+	for i, inst := range m.picker {
+		badge := inst.Badge()
+		path := truncateMiddle(inst.FlavorDir, maxInt(8, width-6-lipgloss.Width(badge)), th.g.Ellipsis)
+		lines = append(lines, pickerRow(i == m.pickerCursor, badge+" "+th.g.Dash+" "+path, th))
+	}
+	lines = append(lines, pickerRow(m.pickerCursor == len(m.picker), "type a flavor directory path manually", th))
+	return lines
+}
+
+// pickerRow renders one picker row: the selection marker and the accent
+// on the active row, plain text on the rest.
+func pickerRow(active bool, label string, th theme) string {
+	if active {
+		return th.accent.Render("> " + label)
+	}
+	return "  " + label
+}
+
+// pathLine renders the manual path prompt: the flavor directory being
+// typed with the input cursor.
+func (m Model) pathLine(width int) string {
+	th := m.theme
+	line := th.dim.Render("path: ") + m.pathText + th.accent.Render(th.g.Cursor)
+	return clip(line, width, th.g.Ellipsis)
+}
+
+// pathHintLine renders the prompt's live validation: the detected install
+// the init will record, or the detection error — never ejecting the user
+// to the shell to find out (A6).
+func (m Model) pathHintLine(width int) string {
+	th := m.theme
+	switch {
+	case m.pathErr != nil:
+		return th.bad.Render(clip(clean(m.pathErr.Error()), width, th.g.Ellipsis))
+	case m.pathInstall != nil:
+		return th.dim.Render(clip(th.g.Arrow+" "+m.pathInstall.Badge(), width, th.g.Ellipsis))
+	}
+	return ""
+}
+
+// onboardingHelp renders the guided-init help line: only the keys the
+// picker and the path prompt answer, so the bar never offers a key that
+// does nothing on this screen.
+func (m Model) onboardingHelp(width int) string {
+	th := m.theme
+	var items []key.Binding
+	if m.pathInput {
+		esc := "back"
+		if len(m.picker) == 0 {
+			esc = "clear"
+		}
+		items = []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set up")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", esc)),
+			key.NewBinding(key.WithKeys("backspace"), key.WithHelp("backspace", "erase")),
+		}
+	} else {
+		items = []key.Binding{
+			key.NewBinding(key.WithKeys("up", "down"), key.WithHelp(th.g.UpDown, "pick")),
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set up")),
+			key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+		}
+	}
+	return clip(m.help.View(helpSubset(items)), width, th.g.Ellipsis)
+}
+
 // addLine renders the add input line: the reference being typed with the
 // input cursor.
 func (m Model) addLine(width int) string {
@@ -471,8 +594,11 @@ func (m Model) waitLine(width int) string {
 // statusBar renders the status zone: the pending quit confirmation while
 // one is up — it states what quitting does to the in-flight install — then
 // the run frame beside the spinner while a sync or add runs: how far the
-// run has come and how it is going. It occupies exactly one line of its
-// own.
+// run has come and how it is going. The tip line — the three most useful
+// keys for the current state (A6) — rides beside whatever the bar has to
+// say: whole tips drop one by one before any of them is cut, and the
+// message stands alone only once no tip fits (the help bar below still
+// lists the keys). It occupies exactly one line of its own.
 func (m Model) statusBar(width int) string {
 	th := m.theme
 	if m.quitAsk != "" {
@@ -483,6 +609,16 @@ func (m Model) statusBar(width int) string {
 		line = strings.TrimRight(m.spin.View(), " ") + " " + m.runFrame()
 		if m.statusLine != "" {
 			line += " " + th.g.MidDot + " " + th.dim.Render(m.statusLine)
+		}
+	}
+	sep := " " + th.g.MidDot + " "
+	for tips := m.tips(); len(tips) > 0; tips = tips[:len(tips)-1] {
+		tip := th.dim.Render(strings.Join(tips, sep))
+		if line == "" {
+			return clip(tip, width, th.g.Ellipsis)
+		}
+		if lipgloss.Width(line)+lipgloss.Width(sep)+lipgloss.Width(tip) <= width {
+			return clip(line+sep+tip, width, th.g.Ellipsis)
 		}
 	}
 	return clip(line, width, th.g.Ellipsis)

@@ -59,6 +59,7 @@ type glyphs struct {
 	Sort     string // active sort column marker
 	Up       string // help label for the up key
 	Down     string // help label for the down key
+	UpDown   string // paired arrows for tip lines ("↑↓" / "up/down")
 }
 
 var unicodeGlyphs = glyphs{
@@ -74,6 +75,7 @@ var unicodeGlyphs = glyphs{
 	Sort:     "▲",
 	Up:       "↑",
 	Down:     "↓",
+	UpDown:   "↑↓",
 }
 
 // asciiGlyphs is the fallback set: the status glyphs are exactly the ASCII
@@ -91,6 +93,7 @@ var asciiGlyphs = glyphs{
 	Sort:     "^",
 	Up:       "up",
 	Down:     "down",
+	UpDown:   "up/down",
 }
 
 // statusClass is the semantic class of a status word. Colors and glyphs are
