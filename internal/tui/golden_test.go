@@ -196,8 +196,9 @@ func detailChangelogFrame(t *testing.T, m Model) Model {
 
 // onboardingBase builds the guided-init fixture (A6): no configured
 // client and two detected installs in the picker, with the same pinned
-// environment and capabilities as goldenBase. The clock is not stamped:
-// the guided-init screen shows no checked stamp.
+// environment and capabilities as goldenBase. The clock is not pinned:
+// the guided-init screen shows no checked stamp (headerBar stamps only a
+// configured client), so the wall clock never enters the frame.
 func onboardingBase(t *testing.T, c caps, w, h int) Model {
 	t.Helper()
 	t.Setenv("LC_ALL", "")

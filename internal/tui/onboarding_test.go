@@ -154,8 +154,11 @@ func TestOnboardingManualPathEntryInits(t *testing.T) {
 	})
 	m := testModelNoClients(t, Options{}, testInstalls()...)
 
-	// Down to the trailing manual entry, enter opens the prompt.
-	m = press(t, m, keyMsg('j'))
+	// Down to the trailing manual entry — one j per detected install
+	// (the cursor clamps on the entry) — enter opens the prompt.
+	for range m.picker {
+		m = press(t, m, keyMsg('j'))
+	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.pathInput {
 		t.Fatal("the manual entry did not open the path prompt")
@@ -177,7 +180,9 @@ func TestOnboardingManualPathEntryInits(t *testing.T) {
 
 	// esc from the prompt returns to the picker when there is one.
 	m = testModelNoClients(t, Options{}, testInstalls()...)
-	m = press(t, m, keyMsg('j'))
+	for range m.picker {
+		m = press(t, m, keyMsg('j'))
+	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = press(t, m, escKey())
 	if m.pathInput {

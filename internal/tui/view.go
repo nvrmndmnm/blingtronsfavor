@@ -188,7 +188,10 @@ func (m Model) plainCells(a service.AddonRow) ([]string, statusClass) {
 
 // headerBar renders the styled header bar: flavor badge, game version,
 // client root and the checked stamp ("checked 14:32", updating after each
-// refresh or sync) on the left, the live addon counts on the right.
+// refresh or sync) on the left, the live addon counts on the right. The
+// stamp belongs to a configured client: the guided-init screen has
+// checked nothing, so it shows no stamp and the wall clock never enters
+// the frame.
 func (m Model) headerBar(width int) string {
 	th := m.theme
 	left := th.accent.Render("bfctl")
@@ -199,10 +202,10 @@ func (m Model) headerBar(width int) string {
 		}
 	}
 	right := ""
-	if !m.checkedAt.IsZero() {
-		right = th.dim.Render("checked " + m.checkedAt.Format("15:04"))
-	}
 	if m.client.Flavor != "" {
+		if !m.checkedAt.IsZero() {
+			right = th.dim.Render("checked " + m.checkedAt.Format("15:04"))
+		}
 		total, updates := m.counts()
 		counts := fmt.Sprintf("%d %s", total, plural(total, "addon"))
 		if updates > 0 {

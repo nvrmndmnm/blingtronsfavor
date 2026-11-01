@@ -17,12 +17,19 @@ const (
 	initFlavorInfo = "Product Flavor!STRING:0\nwowf\n"
 )
 
-// testInitEnv points bfctl's config and cache at fresh temp directories
-// and fabricates one detectable flavor directory, returning its path.
+// testInitEnv points bfctl's config and cache at fresh temp directories,
+// creates the layout in them and fabricates one detectable flavor
+// directory, returning its path. The layout is created here because the
+// state store's Save writes only the file (its directory must already
+// exist), and some fixtures write state ahead of Init — which is what
+// normally creates the layout.
 func testInitEnv(t *testing.T) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	if err := paths.EnsureLayout(); err != nil {
+		t.Fatal(err)
+	}
 	root := filepath.Join(t.TempDir(), "World of Warcraft")
 	flavorDir := filepath.Join(root, "_forever_")
 	if err := os.MkdirAll(flavorDir, 0o700); err != nil {
