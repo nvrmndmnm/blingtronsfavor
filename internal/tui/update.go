@@ -53,6 +53,16 @@ type addDoneMsg struct {
 // the model against a stub without touching the network.
 var addService = service.Add
 
+// The guided-init entry points, variables for the same reason: tests arm
+// the onboarding against stubs without touching the filesystem. Production
+// always uses the client and service implementations — initClient is
+// service.Init, the same init path "bfctl init --path" runs (R5).
+var (
+	detectInstalls = client.DetectInstalls
+	detectInstall  = client.Detect
+	initClient     = service.Init
+)
+
 // Init satisfies tea.Model.
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -191,6 +201,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusLine = "quit cancelled"
 		}
 		return m, nil
+	}
+
+	// The guided-init screen (no client configured yet) answers only its
+	// own keys: the detected-install picker and the manual path prompt.
+	if len(m.status.Clients) == 0 {
+		return m.handleOnboardingKey(msg)
 	}
 
 	if m.addInput {
@@ -376,7 +392,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusLine = "wait for the current run to finish"
 			return m, nil
 		case len(m.status.Clients) == 0:
-			m.statusLine = "no client configured — run \"bfctl init\" first"
+			// Unreachable: the guided-init screen above owns this state.
+			m.statusLine = "no client configured yet"
 			return m, nil
 		}
 		m.addInput = true
@@ -441,6 +458,86 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// handleOnboardingKey routes keys on the guided-init screen (A6): the
+// detected-install picker — enter picks one and performs the init behind
+// the scenes — and its inline manual path prompt. Everything else is
+// ignored, so no list key fires against the empty state.
+func (m Model) handleOnboardingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.pathInput {
+		switch msg.String() {
+		case "enter":
+			m.validatePath()
+			if m.pathErr != nil || m.pathInstall == nil {
+				m.statusLine = "path: enter a World of Warcraft flavor directory first"
+				return m, nil
+			}
+			return m.finishInit(m.pathText)
+		case "esc":
+			if len(m.picker) > 0 {
+				// Back to the picker: the prompt is a fallback, not a trap.
+				m.pathInput = false
+				m.statusLine = ""
+			} else {
+				m.pathText = ""
+				m.pathInstall, m.pathErr = nil, nil
+				m.statusLine = "path cleared"
+			}
+		case "backspace":
+			if len(m.pathText) > 0 {
+				m.pathText = m.pathText[:len(m.pathText)-1]
+			}
+			m.validatePath()
+		default:
+			if msg.Text != "" {
+				m.pathText += msg.Text
+				m.validatePath()
+			}
+		}
+		return m, nil
+	}
+	switch msg.String() {
+	case "enter":
+		if m.pickerCursor < len(m.picker) {
+			return m.finishInit(m.picker[m.pickerCursor].FlavorDir)
+		}
+		// The trailing entry: the inline path prompt, the fallback for
+		// whatever the scan could not guess.
+		m.pathInput = true
+		m.statusLine = ""
+		return m, nil
+	case "up", "k":
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+	case "down", "j":
+		if m.pickerCursor < len(m.picker) {
+			m.pickerCursor++
+		}
+	case "q":
+		return m.quit()
+	}
+	return m, nil
+}
+
+// finishInit runs the init behind the scenes through the shared service
+// path (service.Init — the same call "bfctl init --path" makes, R5), then
+// reloads the status so the configured screens take over.
+func (m Model) finishInit(flavorDir string) (tea.Model, tea.Cmd) {
+	outcome, err := initClient(flavorDir)
+	if err != nil {
+		m.statusLine = "init failed: " + clean(err.Error())
+		return m, nil
+	}
+	m.statusLine = "initialised " + outcome.Install.Badge()
+	if outcome.Replaced != "" {
+		m.statusLine += " " + m.theme.g.Dash + " replaced root " + clean(outcome.Replaced)
+	}
+	m.pathInput = false
+	m.pathText = ""
+	m.pathInstall, m.pathErr = nil, nil
+	return m, loadStatus()
 }
 
 // quit is the "q" key's behavior (R2 — deliberately split from ctrl+c):

@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 
+	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/service"
 )
@@ -193,6 +194,49 @@ func detailChangelogFrame(t *testing.T, m Model) Model {
 	return m
 }
 
+// onboardingBase builds the guided-init fixture (A6): no configured
+// client and two detected installs in the picker, with the same pinned
+// environment and capabilities as goldenBase. The clock is not pinned:
+// the guided-init screen shows no checked stamp (headerBar stamps only a
+// configured client), so the wall clock never enters the frame.
+func onboardingBase(t *testing.T, c caps, w, h int) Model {
+	t.Helper()
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "C.UTF-8")
+	t.Setenv("NO_COLOR", "")
+	if !c.color {
+		t.Setenv("NO_COLOR", "1")
+	}
+	m := testModelNoClients(t, Options{ASCII: !c.unicode}, testInstalls()...)
+	m.width, m.height = w, h
+	return m
+}
+
+// onboardingPathFrame is the manual path prompt mid-typing (A6): the
+// inline input with its live detection hint — the detected install the
+// behind-the-scenes init will record.
+func onboardingPathFrame(t *testing.T, c caps, w, h int) Model {
+	t.Helper()
+	m := onboardingBase(t, c, w, h)
+	m.pickerCursor = len(m.picker)
+	m.pathInput = true
+	m.pathText = "~/Games/World of Warcraft/_forever_"
+	m.pathInstall = &client.ClientInstall{Flavor: client.FlavorForever,
+		FlavorDir: "/root/Games/World of Warcraft/_forever_",
+		Version:   client.Version{Major: 1, Minor: 60, Patch: 1, Build: 58900}, Interface: 16001}
+	return m
+}
+
+// zeroAddonFrame is the configured-but-zero-addons state (A6): the hint
+// panel in place of the empty grid.
+func zeroAddonFrame(t *testing.T, m Model) Model {
+	t.Helper()
+	m.client.Addons = nil
+	m.refreshRows()
+	return m
+}
+
 // TestGoldenFrames pins every screen state above as a golden frame.
 func TestGoldenFrames(t *testing.T) {
 	color := caps{unicode: true, color: true}
@@ -248,6 +292,21 @@ func TestGoldenFrames(t *testing.T) {
 			m.helpOpen = true
 			return m
 		}},
+
+		// The guided-init screens and the zero-addons hint panel (A6).
+		// The build funcs replace the configured fixture with the
+		// no-client one (onboardingBase), so the frame carries no
+		// configured client at all.
+		{"onboard-picker-100", color, 100, 28, false, func(t *testing.T, _ Model) Model {
+			return onboardingBase(t, color, 100, 28)
+		}},
+		{"onboard-picker-80-ascii", ascii, 80, 28, false, func(t *testing.T, _ Model) Model {
+			return onboardingBase(t, ascii, 80, 28)
+		}},
+		{"onboard-path-100", color, 100, 28, false, func(t *testing.T, _ Model) Model {
+			return onboardingPathFrame(t, color, 100, 28)
+		}},
+		{"zero-addons-100", color, 100, 28, false, zeroAddonFrame},
 
 		// NO_COLOR variants: no color codes, every word intact.
 		{"idle-80-nocolor", nocolor, 80, 28, false, nil},
