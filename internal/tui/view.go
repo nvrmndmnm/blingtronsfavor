@@ -505,8 +505,9 @@ func (m Model) pathHintLine(width int) string {
 }
 
 // onboardingHelp renders the guided-init help line: only the keys the
-// picker and the path prompt answer, so the bar never offers a key that
-// does nothing on this screen.
+// picker and the path prompt answer — the actionable controls, never the
+// narrated typing and erasing every input speaks for — so the bar never
+// offers a key that does nothing on this screen.
 func (m Model) onboardingHelp(width int) string {
 	th := m.theme
 	var items []key.Binding
@@ -518,7 +519,6 @@ func (m Model) onboardingHelp(width int) string {
 		items = []key.Binding{
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "set up")),
 			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", esc)),
-			key.NewBinding(key.WithKeys("backspace"), key.WithHelp("backspace", "erase")),
 		}
 	} else {
 		items = []key.Binding{

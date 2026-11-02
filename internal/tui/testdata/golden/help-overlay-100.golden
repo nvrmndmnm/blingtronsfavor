@@ -1,14 +1,16 @@
 ╭─ help — ? or esc closes ─────────────────────────────────────────────────────────────────────────╮
 │ [1mthe list[m                                                                                         │
 │ [1m↑/k[m [2mup[m[2m · [m[1m↓/j[m [2mdown[m[2m · [m[1mpgup[m [2mpage up[m[2m · [m[1mpgdown[m [2mpage down[m[2m · [m[1menter[m [2mdetail[m[2m · [m[1m/[m [2mfilter[m[2m · [m[1mo[m [2msort[m           │
-│ [1mu[m [2mupdate all[m[2m · [m[1ma[m [2madd[m[2m · [m[1mU[m [2mupdate one[m[2m · [m[1mc[m [2mcheck[m[2m · [m[1mr[m [2mrefresh[m[2m · [m[1ms[m [2mrelease/branch[m[2m · [m[1md[m [2mdelete[m[2m · [m[1m?[m [2mhelp[m │
-│ [1mq[m [2mquit[m[2m · [m[1mctrl+c[m [2mcancel & quit[m                                                                    │
+│ [1mu[m [2mupdate all addons[m[2m · [m[1ma[m [2madd[m[2m · [m[1mU[m [2mupdate the selected addon only[m                                   │
+│ [1mc[m [2mcheck for updates without modifying disk (dry run)[m                                             │
+│ [1mr[m [2mreload status from disk, update the checked stamp[m[2m · [m[1ms[m [2mtoggle release/branch tracking[m           │
+│ [1md[m [2mdelete[m[2m · [m[1m?[m [2mhelp[m[2m · [m[1mq[m [2mquit[m[2m · [m[1mctrl+c[m [2mcancel & quit[m                                                │
 │                                                                                                  │
 │ [1mfilter input[m                                                                                     │
-│ [1mtyping[m [2mnarrows the list[m[2m · [m[1mbackspace[m [2merase[m[2m · [m[1menter[m [2mapply[m[2m · [m[1mesc[m [2mclear[m                              │
+│ [1menter[m [2mapply[m[2m · [m[1mesc[m [2mclear[m                                                                          │
 │                                                                                                  │
 │ [1madd input[m                                                                                        │
-│ [1mtyping[m [2menters a reference[m[2m · [m[1mbackspace[m [2merase[m[2m · [m[1menter[m [2mcontinue[m[2m · [m[1mesc[m [2mcancel[m                        │
+│ [1menter[m [2mcontinue[m[2m · [m[1mesc[m [2mcancel[m                                                                      │
 │                                                                                                  │
 │ [1mtarget flavor[m                                                                                    │
 │ [1m1-9[m [2mpick[m[2m · [m[1m↑/k ↓/j[m [2mpick[m[2m · [m[1menter[m [2madd[m[2m · [m[1mesc[m [2mcancel[m                                                 │
@@ -18,8 +20,6 @@
 │                                                                                                  │
 │ [1mduring a run[m                                                                                     │
 │ [1mesc[m [2mcancel the add[m[2m · [m[1mctrl+c[m [2mcancel the sync[m[2m · [m[1mq[m [2mask to quit[m                                      │
-│                                                                                                  │
-│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

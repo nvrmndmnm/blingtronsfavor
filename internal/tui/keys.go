@@ -6,7 +6,8 @@ import (
 
 // keyMap is the TUI key map, exactly the bindings the UX contract fixes:
 //
-//	u update all · a add · U update one · c check · r refresh ·
+//	u update all addons · a add · U update selected ·
+//	c check (dry run) · r reload from disk ·
 //	s toggle release/branch · d delete (confirm) ·
 //	enter detail pane · / filter (esc clears) · o sort ·
 //	tab / [ ] switch client · ? help · q quit
@@ -56,12 +57,12 @@ func newKeyMap(g glyphs) keyMap {
 		Filter:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Sort:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
 		Client:    key.NewBinding(key.WithKeys("tab", "[", "]"), key.WithHelp("tab/[ ]", "switch client"), key.WithDisabled()),
-		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all")),
+		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update all addons")),
 		Add:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add")),
-		UpdateOne: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update one")),
-		Check:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "check")),
-		Refresh:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-		Track:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "release/branch")),
+		UpdateOne: key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update selected")),
+		Check:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "check (dry run)")),
+		Refresh:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload from disk")),
+		Track:     key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "toggle release/branch")),
 		Delete:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 		Confirm:   key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y", "confirm")),
 		Cancel:    key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("esc", "cancel")),
@@ -106,10 +107,20 @@ func bindingRow(kb key.Binding) helpRow {
 	return helpRow{key: h.Key, desc: h.Desc}
 }
 
+// actionRow renders one binding with the overlay's full behavior note, so
+// the ? help explains what the key actually does (a dry run, a disk
+// reload) instead of repeating its terse bottom-bar label.
+func actionRow(kb key.Binding, desc string) helpRow {
+	return helpRow{key: kb.Help().Key, desc: desc}
+}
+
 // helpSections is the full help overlay's content: every keybinding
 // grouped by the context it is active in — the list, the two text inputs,
 // the target-flavor prompt, the confirmations, and the keys that act on a
-// running sync.
+// running sync. The action keys carry their concrete behavior here while
+// the bindings stay terse for the compact bottom bar; the inputs list
+// only their actionable controls (apply/cancel) — narrating typing and
+// backspace wastes the space the keys need.
 func (k keyMap) helpSections() []helpSection {
 	list := []helpRow{
 		bindingRow(k.Up), bindingRow(k.Down), bindingRow(k.PgUp), bindingRow(k.PgDn),
@@ -121,21 +132,21 @@ func (k keyMap) helpSections() []helpSection {
 		list = append(list, bindingRow(k.Client))
 	}
 	list = append(list,
-		bindingRow(k.Update), bindingRow(k.Add), bindingRow(k.UpdateOne), bindingRow(k.Check),
-		bindingRow(k.Refresh), bindingRow(k.Track), bindingRow(k.Delete),
+		bindingRow(k.Update), bindingRow(k.Add),
+		actionRow(k.UpdateOne, "update the selected addon only"),
+		actionRow(k.Check, "check for updates without modifying disk (dry run)"),
+		actionRow(k.Refresh, "reload status from disk, update the checked stamp"),
+		actionRow(k.Track, "toggle release/branch tracking"),
+		bindingRow(k.Delete),
 		bindingRow(k.Help), bindingRow(k.Quit), bindingRow(k.Interrupt),
 	)
 	return []helpSection{
 		{title: "the list", rows: list},
 		{title: "filter input", rows: []helpRow{
-			{"typing", "narrows the list"},
-			{"backspace", "erase"},
 			{"enter", "apply"},
 			{"esc", "clear"},
 		}},
 		{title: "add input", rows: []helpRow{
-			{"typing", "enters a reference"},
-			{"backspace", "erase"},
 			{"enter", "continue"},
 			{"esc", "cancel"},
 		}},
