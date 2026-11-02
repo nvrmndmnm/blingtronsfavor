@@ -9,6 +9,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/paths"
@@ -190,6 +191,29 @@ func TestOnboardingManualPathEntryInits(t *testing.T) {
 	}
 }
 
+// TestOnboardingHelpShowsOnlyActionableKeys pins the guided-init screen
+// after the XD-58 help cleanup: the help and tip lines carry the
+// actionable controls (enter, esc) and none of the trivial "backspace
+// erase" narration.
+func TestOnboardingHelpShowsOnlyActionableKeys(t *testing.T) {
+	m := testModelNoClients(t, Options{}, testInstalls()...)
+	for range m.picker {
+		m = press(t, m, keyMsg('j'))
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{"enter set up", "esc back"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("path prompt help is missing %q:\n%s", want, content)
+		}
+	}
+	for _, notWant := range []string{"backspace", "erase"} {
+		if strings.Contains(content, notWant) {
+			t.Fatalf("path prompt help still narrates %q:\n%s", notWant, content)
+		}
+	}
+}
+
 func TestOnboardingPathPromptValidatesLive(t *testing.T) {
 	inits := 0
 	stubInitClient(t, func(string) (service.InitResult, error) {
@@ -308,7 +332,7 @@ func TestTipLineTracksCurrentState(t *testing.T) {
 			name:    "add input",
 			build:   func(m *Model) { m.addInput = true },
 			want:    []string{"enter continue", "esc cancel"},
-			notWant: []string{"u sync"},
+			notWant: []string{"u sync", "backspace erase"},
 		},
 	}
 	for _, tc := range cases {

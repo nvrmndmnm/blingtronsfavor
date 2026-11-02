@@ -376,11 +376,11 @@ func (m Model) tips() []string {
 	case m.confirm:
 		return []string{"y confirm", "esc cancel"}
 	case m.addInput:
-		return []string{"enter continue", "esc cancel", "backspace erase"}
+		return []string{"enter continue", "esc cancel"}
 	case m.addChoose:
 		return []string{m.theme.g.UpDown + " pick", "enter add", "esc cancel"}
 	case m.filtering:
-		return []string{"enter apply", "esc clear", "backspace erase"}
+		return []string{"enter apply", "esc clear"}
 	case m.adding:
 		return []string{"esc cancel", "q quit"}
 	case m.syncing:
@@ -391,7 +391,7 @@ func (m Model) tips() []string {
 			if len(m.picker) == 0 {
 				esc = "esc clear"
 			}
-			return []string{"enter set up", "backspace erase", esc}
+			return []string{"enter set up", esc}
 		}
 		return []string{m.theme.g.UpDown + " pick", "enter set up", "q quit"}
 	case m.filter != "" && len(m.rows) == 0:
