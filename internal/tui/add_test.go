@@ -185,3 +185,184 @@ func TestEscCancelsRunningAdd(t *testing.T) {
 		t.Fatalf("statusLine = %q, want the rollback explanation", m.statusLine)
 	}
 }
+
+// The add input's terminal editing (XD-56): clipboard paste and the
+// standard readline navigation and editing shortcuts, all cursor-aware.
+
+// ctrlKey builds a ctrl+letter press.
+func ctrlKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl}
+}
+
+// altKey builds an alt+letter press. Terminals may deliver the letter as
+// the key's text along with the alt modifier, so the fixture does too.
+func altKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModAlt, Text: string(code)}
+}
+
+// addInputModel opens the add input and types s into it.
+func addInputModel(t *testing.T, s string) Model {
+	t.Helper()
+	m := testModel(t)
+	m = press(t, m, keyMsg('a'))
+	return typeText(t, m, s)
+}
+
+func TestAddInputInsertsAtTheCursor(t *testing.T) {
+	m := addInputModel(t, "ab")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = press(t, m, keyMsg('X'))
+	if m.addText != "aXb" {
+		t.Fatalf("addText = %q, want %q — typing must land at the cursor", m.addText, "aXb")
+	}
+	if m.addCur != 2 {
+		t.Fatalf("addCur = %d, want 2 (after the inserted rune)", m.addCur)
+	}
+
+	// backspace erases before the cursor, delete erases at it.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if m.addText != "ab" {
+		t.Fatalf("addText = %q, want %q", m.addText, "ab")
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyDelete})
+	if m.addText != "a" {
+		t.Fatalf("addText = %q, want %q", m.addText, "a")
+	}
+}
+
+func TestAddInputWordEditing(t *testing.T) {
+	// ctrl+w deletes the word before the cursor, whitespace-delimited.
+	m := addInputModel(t, "owner/repo other")
+	m = press(t, m, ctrlKey('w'))
+	if m.addText != "owner/repo " {
+		t.Fatalf("ctrl+w: addText = %q, want %q", m.addText, "owner/repo ")
+	}
+	m = press(t, m, ctrlKey('w'))
+	if m.addText != "" {
+		t.Fatalf("ctrl+w: addText = %q, want it empty", m.addText)
+	}
+
+	// alt+b / alt+f move by word in both directions.
+	m = addInputModel(t, "aa bb cc")
+	m = press(t, m, altKey('b'))
+	if m.addCur != 6 {
+		t.Fatalf("alt+b: addCur = %d, want 6 (before the last word)", m.addCur)
+	}
+	m = press(t, m, altKey('f'))
+	if m.addCur != 8 {
+		t.Fatalf("alt+f: addCur = %d, want 8 (end of the line)", m.addCur)
+	}
+	// alt+left / alt+right answer the same motion.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModAlt})
+	if m.addCur != 6 {
+		t.Fatalf("alt+left: addCur = %d, want 6", m.addCur)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModAlt})
+	if m.addCur != 8 {
+		t.Fatalf("alt+right: addCur = %d, want 8", m.addCur)
+	}
+
+	// ctrl+u clears from the cursor back to the start of the line.
+	m = addInputModel(t, "abcdef")
+	for i := 0; i < 2; i++ {
+		m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	}
+	m = press(t, m, ctrlKey('u'))
+	if m.addText != "ef" || m.addCur != 0 {
+		t.Fatalf("ctrl+u: addText = %q addCur = %d, want %q and 0", m.addText, m.addCur, "ef")
+	}
+}
+
+func TestAddInputLineMotion(t *testing.T) {
+	// home / ctrl+a jump to the start, end / ctrl+e to the end.
+	m := addInputModel(t, "abc")
+	for _, key := range []tea.KeyPressMsg{
+		{Code: tea.KeyHome}, ctrlKey('a'),
+	} {
+		m = press(t, m, key)
+		if m.addCur != 0 {
+			t.Fatalf("%v: addCur = %d, want 0", key, m.addCur)
+		}
+	}
+	m = press(t, m, keyMsg('X'))
+	if m.addText != "Xabc" {
+		t.Fatalf("typing at the line start: addText = %q, want %q", m.addText, "Xabc")
+	}
+	for _, key := range []tea.KeyPressMsg{
+		{Code: tea.KeyEnd}, ctrlKey('e'),
+	} {
+		m = press(t, m, key)
+		if m.addCur != 4 {
+			t.Fatalf("%v: addCur = %d, want 4", key, m.addCur)
+		}
+	}
+	m = press(t, m, keyMsg('Y'))
+	if m.addText != "XabcY" {
+		t.Fatalf("typing at the line end: addText = %q, want %q", m.addText, "XabcY")
+	}
+
+	// The arrows move one rune at a time and stop at the line bounds.
+	m = addInputModel(t, "ab")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.addCur != 2 {
+		t.Fatalf("right at the end: addCur = %d, want 2", m.addCur)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	if m.addCur != 0 {
+		t.Fatalf("left at the start: addCur = %d, want 0", m.addCur)
+	}
+}
+
+func TestAddInputAcceptsPastedText(t *testing.T) {
+	// Bracketed paste (ctrl+shift+v in most terminals) lands at the
+	// cursor; a copied trailing newline never reaches the input.
+	m := addInputModel(t, "owner/")
+	next, _ := m.Update(tea.PasteMsg{Content: "repo\r\n"})
+	m = next.(Model)
+	if m.addText != "owner/repo" {
+		t.Fatalf("paste: addText = %q, want %q", m.addText, "owner/repo")
+	}
+	if m.addCur != len([]rune(m.addText)) {
+		t.Fatalf("paste: addCur = %d, want the end of the pasted text", m.addCur)
+	}
+
+	// A paste pasted mid-line inserts at the cursor and re-validates.
+	m = addInputModel(t, "owner/repo")
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	next, _ = m.Update(tea.PasteMsg{Content: "XX"})
+	m = next.(Model)
+	if m.addText != "owner/reXXpo" {
+		t.Fatalf("mid-line paste: addText = %q, want %q", m.addText, "owner/reXXpo")
+	}
+	if m.addErr != nil {
+		t.Fatalf("addErr = %v, want the re-validated parse (the ref is still valid)", m.addErr)
+	}
+
+	// Pasting outside the add input is ignored, never typed into the list.
+	m = testModel(t)
+	next, _ = m.Update(tea.PasteMsg{Content: "q"})
+	m = next.(Model)
+	if m.quitting {
+		t.Fatal("a paste outside the add input triggered a list key")
+	}
+}
+
+func TestAddInputEditingKeepsTheValidationHint(t *testing.T) {
+	// Every edit re-parses the reference, so the inline hint follows the
+	// cursor-aware editing.
+	m := addInputModel(t, "wago:eqol")
+	if m.addParsed.Kind != state.SourceWago {
+		t.Fatalf("addParsed = %+v, want the wago ref", m.addParsed)
+	}
+	m = press(t, m, ctrlKey('w'))
+	if m.addParsed.Kind != "" || m.addErr != nil {
+		t.Fatalf("after ctrl+w: addParsed = %+v addErr = %v, want an empty re-parse", m.addParsed, m.addErr)
+	}
+	m = typeText(t, m, "owner/repo")
+	if m.addParsed.Kind != state.SourceGitHub {
+		t.Fatalf("addParsed = %+v, want the github ref after retyping", m.addParsed)
+	}
+}

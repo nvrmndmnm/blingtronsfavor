@@ -1,28 +1,28 @@
 [1;38;5;6mForever[m [1m1.60.1[m · [2m/games/World of Warcraft/_forever_[m                                              [2mchecked 15:04[m · 1 addon
-[1m▲ Addon                      [m[1mInstalled[m[1mUpstream [m[1mStrategy[m[1mStatus       [m          │ [1;38;5;6mrarescanner[m                             
- [1;38;5;6mrarescanner[m                    [1;38;5;6m1.60.1.b1[m  [1;38;5;6m1.60.1.b2[m  [1;38;5;6mDirect[m    [1;38;5;1m✗ Mismatch[m    │                                         
-                                                                              │ [2mSource   [m  [2mhttps://github.com/o/r[m       
-                                                                              │            [2m(github)[m                     
-                                                                              │ [2mTracking [m  [2mstable[m                       
-                                                                              │ [2mStrategy [m  [2mDirect[m                       
-                                                                              │ [2mInstalled[m  [2m1.60.1.b1[m                    
-                                                                              │ [2mUpstream [m  [2m1.60.1.b2[m                    
-                                                                              │ [2mStatus   [m  [38;5;1m✗ built for 110002 — may be[m  
-                                                                              │            [38;5;1moutdated[m                     
-                                                                              │ [2mDirs     [m  [2mRareScanner, RareScanner_Data[m
-                                                                              │                                         
-                                                                              │ [1mChangelog[m                               
-                                                                              │ - fixed the map overlay                 
-                                                                              │ - updated the locales                   
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-                                                                              │                                         
-[2m↑↓ select · enter details · u sync[m
+ [1m▲ Addon    [m  [1mSource        [m  [1mInstalled[m  [1mUpstream [m  [1mStrategy  [m  [1mStatus    [m                                              
+ [1;38;5;6mrarescanner[m  [1;38;5;6mgithub release[m  [1;38;5;6m1.60.1.b1[m  [1;38;5;6m1.60.1.b2[m  [1;38;5;6mGH-Release[m  [1;38;5;1m✗ Mismatch[m                                              
+                                                                                                                        
+                                                                                                                        
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ [1;38;5;6mrarescanner[m                                                                                                          │
+│                                                                                                                      │
+│ [2mSource   [m  [2mgithub release[m                                                                                            │
+│ [2mTracking [m  [2mstable[m                                                                                                    │
+│ [2mStrategy [m  [2mGH-Release[m                                                                                                │
+│ [2mInstalled[m  [2m1.60.1.b1[m                                                                                                 │
+│ [2mUpstream [m  [2m1.60.1.b2[m                                                                                                 │
+│ [2mStatus   [m  [38;5;1m✗ built for 110002 — may be outdated[m                                                                      │
+│ [2mDirs     [m  [2mRareScanner, RareScanner_Data[m                                                                             │
+│                                                                                                                      │
+│ [1mChangelog[m                                                                                                            │
+│ - fixed the map overlay                                                                                              │
+│ - updated the locales                                                                                                │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+[2mU update one · s tracking · d delete[m
 [1mu[m [2mupdate all[m[2m · [m[1ma[m [2madd[m[2m · [m[1mU[m [2mupdate one[m[2m · [m[1mc[m [2mcheck[m[2m · [m[1mr[m [2mrefresh[m[2m · [m[1ms[m [2mrelease/branch[m[2m · [m[1md[m [2mdelete[m[2m · [m[1menter[m [2mdetail[m[2m · [m[1m?[m [2mhelp[m[2m · [m[1mq[m [2mquit[m

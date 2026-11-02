@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -160,6 +161,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.statusLine = msg.id + " removed"
 		return m, loadStatus()
+	case tea.PasteMsg:
+		// Clipboard paste (bracketed paste — ctrl+shift+v or the terminal's
+		// paste key): the first line lands at the cursor in the add input,
+		// exactly like typing it there (XD-56).
+		if m.addInput {
+			m.insertAddText(pasteText(msg.Content))
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -210,8 +219,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.addInput {
-		switch msg.String() {
-		case "enter":
+		runes := []rune(m.addText)
+		m.addCur = clampInt(m.addCur, 0, len(runes))
+		switch {
+		case msg.Code == tea.KeyEnter:
 			if m.addText == "" {
 				m.statusLine = "add: enter a reference first"
 				return m, nil
@@ -232,22 +243,64 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m.startAdd(m.status.Clients[0])
-		case "esc":
+		case msg.Code == tea.KeyEsc:
 			// esc cancels the flow before anything happened.
 			m.addInput = false
 			m.addText = ""
+			m.addCur = 0
 			m.addParsed = service.AddRef{}
 			m.addErr = nil
 			m.statusLine = "add cancelled"
-		case "backspace":
-			if len(m.addText) > 0 {
-				m.addText = m.addText[:len(m.addText)-1]
+		case msg.Code == tea.KeyBackspace:
+			if m.addCur > 0 {
+				m.addText = string(runes[:m.addCur-1]) + string(runes[m.addCur:])
+				m.addCur--
 			}
 			m.validateAdd()
+		case msg.Code == tea.KeyDelete:
+			if m.addCur < len(runes) {
+				m.addText = string(runes[:m.addCur]) + string(runes[m.addCur+1:])
+			}
+			m.validateAdd()
+		case (msg.Code == tea.KeyLeft || msg.Code == 'b') && msg.Mod.Contains(tea.ModAlt):
+			// alt+b / alt+left: cursor back one word.
+			m.addCur = wordLeft(runes, m.addCur)
+		case (msg.Code == tea.KeyRight || msg.Code == 'f') && msg.Mod.Contains(tea.ModAlt):
+			// alt+f / alt+right: cursor forward one word.
+			m.addCur = wordRight(runes, m.addCur)
+		case msg.Code == tea.KeyLeft:
+			if m.addCur > 0 {
+				m.addCur--
+			}
+		case msg.Code == tea.KeyRight:
+			if m.addCur < len(runes) {
+				m.addCur++
+			}
+		case msg.Code == tea.KeyHome || (msg.Code == 'a' && msg.Mod.Contains(tea.ModCtrl)):
+			// home / ctrl+a: move to the start of the line.
+			m.addCur = 0
+		case msg.Code == tea.KeyEnd || (msg.Code == 'e' && msg.Mod.Contains(tea.ModCtrl)):
+			// end / ctrl+e: move to the end of the line.
+			m.addCur = len(runes)
+		case msg.Code == 'w' && msg.Mod.Contains(tea.ModCtrl):
+			// ctrl+w: delete the word before the cursor (readline's
+			// unix-word-rubout — whitespace-delimited, so one press clears
+			// one pasted chunk of a reference).
+			cut := wordLeft(runes, m.addCur)
+			m.addText = string(runes[:cut]) + string(runes[m.addCur:])
+			m.addCur = cut
+			m.validateAdd()
+		case msg.Code == 'u' && msg.Mod.Contains(tea.ModCtrl):
+			// ctrl+u: clear from the cursor back to the start of the line.
+			m.addText = string(runes[m.addCur:])
+			m.addCur = 0
+			m.validateAdd()
 		default:
-			if msg.Text != "" {
-				m.addText += msg.Text
-				m.validateAdd()
+			// Typing inserts at the cursor. Modifier chords never type —
+			// alt+b and friends may carry printable text — so only plain
+			// (or shift) text inserts.
+			if msg.Text != "" && !msg.Mod.Contains(tea.ModCtrl) && !msg.Mod.Contains(tea.ModAlt) && !msg.Mod.Contains(tea.ModMeta) {
+				m.insertAddText(msg.Text)
 			}
 		}
 		return m, nil
@@ -262,6 +315,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.addChoose = false
 			m.addInput = false
 			m.addText = ""
+			m.addCur = 0
 			m.addParsed = service.AddRef{}
 			m.addErr = nil
 			m.statusLine = "add cancelled"
@@ -337,7 +391,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen = true
 	case key.Matches(msg, m.keys.Detail):
 		if m.detailFocus {
-			// enter returns to the table; the toggle overlay closes with it.
+			// enter returns to the table; the detail pane closes with it.
 			m.detail = false
 			m.detailFocus = false
 			m.statusLine = ""
@@ -398,6 +452,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.addInput = true
 		m.addText = ""
+		m.addCur = 0
 		m.addParsed = service.AddRef{}
 		m.addErr = nil
 		m.statusLine = "add: paste a ref — owner/repo, a wago.io or curseforge.com URL, or a git remote"
@@ -718,4 +773,60 @@ func refreshStatus() tea.Cmd {
 		st, err := service.LoadStatus()
 		return statusMsg{status: st, err: err, refreshed: true}
 	}
+}
+
+// insertAddText inserts text at the add input's cursor and re-validates
+// the reference — the shared tail of typing and pasting (XD-56).
+func (m *Model) insertAddText(s string) {
+	if s == "" {
+		return
+	}
+	runes := []rune(m.addText)
+	cur := clampInt(m.addCur, 0, len(runes))
+	m.addText = string(runes[:cur]) + s + string(runes[cur:])
+	m.addCur = cur + len([]rune(s))
+	m.validateAdd()
+}
+
+// pasteText prepares pasted content for the add input: the first line of
+// the paste (a reference copied with its trailing newline loses it) with
+// the remaining control bytes stripped, so a paste can never smuggle a
+// line break or an escape into the input.
+func pasteText(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return clean(s)
+}
+
+// wordLeft moves the cursor back to the start of the previous word:
+// whitespace first, then the word before it — readline's alt+b and the
+// left half of ctrl+w's delete.
+func wordLeft(r []rune, cur int) int {
+	cur = clampInt(cur, 0, len(r))
+	for cur > 0 && isSpaceRune(r[cur-1]) {
+		cur--
+	}
+	for cur > 0 && !isSpaceRune(r[cur-1]) {
+		cur--
+	}
+	return cur
+}
+
+// wordRight moves the cursor forward to the end of the next word —
+// readline's alt+f.
+func wordRight(r []rune, cur int) int {
+	cur = clampInt(cur, 0, len(r))
+	for cur < len(r) && isSpaceRune(r[cur]) {
+		cur++
+	}
+	for cur < len(r) && !isSpaceRune(r[cur]) {
+		cur++
+	}
+	return cur
+}
+
+// isSpaceRune reports whether r separates words in the input.
+func isSpaceRune(r rune) bool {
+	return r == ' ' || r == '\t'
 }

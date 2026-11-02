@@ -17,9 +17,15 @@ const (
 	statusZoneH = 1 // status bar
 	helpZoneH   = 1 // help bar — its own zone, never sharing lines with status
 
-	// sideDetailMinWidth is the terminal width from which the detail pane
-	// becomes persistent beside the table instead of a toggle overlay.
-	sideDetailMinWidth = 120
+	// detailListRows is how many addon rows stay visible while the
+	// expanded detail pane is open (XD-56): only the top of the list —
+	// its header line plus these rows — the rest of the screen goes to
+	// the details.
+	detailListRows = 3
+
+	// detailMinH is the smallest useful detail box (both borders plus one
+	// content line): on tiny terminals the list yields before the details.
+	detailMinH = 3
 
 	minColWidth = 3 // hard floor per column when the terminal is tiny
 )
@@ -28,20 +34,20 @@ const (
 type screenPlan struct {
 	width, height  int
 	tableW, tableH int
-	side           bool // persistent side detail pane
-	detailW        int  // detail content width (side pane)
-	overlayH       int  // toggle-overlay detail height, 0 when absent
-	filterH        int  // filter line height, 0 or 1
-	waitH          int  // rate-limit wait line height, 0 or 1
-	addH           int  // add input + hint + flavor prompt heights, 0–3
+	detailW        int // detail content width (expanded pane)
+	detailH        int // detail box height (bordered pane), 0 when closed
+	filterH        int // filter line height, 0 or 1
+	waitH          int // rate-limit wait line height, 0 or 1
+	addH           int // add input + hint + flavor prompt heights, 0–3
 }
 
 // planScreen computes the screen geometry for one terminal size and view
-// state. wantDetail is the detail toggle state (only meaningful below the
-// side-pane width), addH is the height the add flow's input and prompt
-// lines want, and overlayNeed is the height the overlay would like to have
-// (content plus its border).
-func planScreen(w, h int, wantDetail, filterOn, waitOn bool, addH, overlayNeed int) screenPlan {
+// state. wantDetail is the detail pane state (enter opens it, esc closes
+// it): open, the addons list keeps only its top rows in a dedicated
+// detail view and the details take the remaining space (XD-56); closed,
+// the full list takes every free line and no detail is drawn at any
+// width. addH is the height the add flow's input and prompt lines want.
+func planScreen(w, h int, wantDetail, filterOn, waitOn bool, addH int) screenPlan {
 	p := screenPlan{width: w, height: h}
 	fixed := headerZoneH + statusZoneH + helpZoneH
 	if filterOn {
@@ -54,22 +60,24 @@ func planScreen(w, h int, wantDetail, filterOn, waitOn bool, addH, overlayNeed i
 	}
 	p.addH = clampInt(addH, 0, 3)
 	fixed += p.addH
-	if w >= sideDetailMinWidth {
-		p.side = true
-		p.detailW = clampInt(w/3, 28, 44)
-		p.tableW = w - p.detailW - 2 // 2 = vertical rule + gap
-	} else {
-		p.tableW = w
-		if wantDetail {
-			p.overlayH = overlayNeed
+	p.tableW = w
+	p.detailW = maxInt(8, w-4)
+	if wantDetail {
+		// The dedicated detail view: the list keeps only its top rows and
+		// the details get everything else. When even that does not fit the
+		// list yields first — the details are the point of this view — but
+		// it always keeps at least one line.
+		listH := detailListRows + 1 // the rows plus the table's header line
+		if fixed+listH+detailMinH > h {
+			listH = clampInt(h-fixed-detailMinH, 1, listH)
 		}
+		p.tableH = listH
+		p.detailH = maxInt(0, h-fixed-listH)
+	} else {
+		// The full list: the table keeps at least one row and takes every
+		// free line.
+		p.tableH = maxInt(1, h-fixed)
 	}
-	// The status and help bars always get their own line; the table keeps
-	// at least one row; a squeezed overlay shrinks to fit the free space.
-	if fixed+1+p.overlayH > h {
-		p.overlayH = maxInt(0, h-fixed-1)
-	}
-	p.tableH = maxInt(1, h-fixed-p.overlayH)
 	return p
 }
 
@@ -80,15 +88,19 @@ type colSpec struct {
 	max   int // cap for content-proportional slack shares
 }
 
-// columnSpecs fixes the five columns and their sizing bounds. The minimums
-// sum to 50 so the layout still holds at 60 columns (50 cells plus the
-// per-cell padding).
+// columnSpecs fixes the six columns and their sizing bounds: the addon
+// name (capped narrow — it no longer soaks up a wide terminal's spare
+// room), the acquisition source the Source column names (XD-56), the two
+// versions, the strategy and the status. The minimums sum to 48 so the
+// layout still holds at 60 columns (48 cells plus the per-cell padding of
+// six columns).
 var columnSpecs = []colSpec{
-	{title: "Addon", min: 12, max: 34},
-	{title: "Installed", min: 9, max: 14},
-	{title: "Upstream", min: 8, max: 18},
-	{title: "Strategy", min: 8, max: 14},
-	{title: "Status", min: 13, max: 28},
+	{title: "Addon", min: 8, max: 24},
+	{title: "Source", min: 8, max: 14},
+	{title: "Installed", min: 9, max: 12},
+	{title: "Upstream", min: 8, max: 16},
+	{title: "Strategy", min: 8, max: 13},
+	{title: "Status", min: 7, max: 26},
 }
 
 // cellGap is the horizontal padding the table draws around each cell.
@@ -103,9 +115,11 @@ func tableAvail(tableW, cols int) int {
 // columnWidths computes each column's width for avail cells: every column
 // starts at its minimum and the slack is shared out proportionally to each
 // column's content demand (its natural width above the minimum, capped at
-// the column max). When the slack outgrows every demand the remainder
-// widens the first column — names benefit most from spare room. Below the
-// minimum sum the columns shrink proportionally instead of dropping any.
+// the column max). A column never grows past its content or its max — the
+// name column especially no longer stretches to swallow the spare room of
+// a wide terminal (XD-56), so the table keeps its natural width there and
+// the columns stay readable. Below the minimum sum the columns shrink
+// proportionally instead of dropping any.
 func columnWidths(avail int, specs []colSpec, naturals []int) []int {
 	widths := make([]int, len(specs))
 	minSum := 0
@@ -132,15 +146,13 @@ func columnWidths(avail int, specs []colSpec, naturals []int) []int {
 		demand[i] = n - s.min
 		total += demand[i]
 	}
-	if total == 0 {
-		widths[0] += slack
-		return widths
-	}
 	if slack >= total {
+		// Every column shows its content in full (up to its max); spare
+		// room stays unused instead of stretching one column into the
+		// others' share of the screen.
 		for i := range widths {
 			widths[i] += demand[i]
 		}
-		widths[0] += slack - total
 		return widths
 	}
 	// Proportional shares, with the rounding remainder handed out in

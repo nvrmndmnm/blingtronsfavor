@@ -54,14 +54,9 @@ func (m Model) render() string {
 	// something to validate) and the target-flavor prompt.
 	addH := m.addHeight()
 
-	// Detail pane geometry feeds the plan: the overlay needs its content
-	// height up front, the side pane is sized by planScreen itself.
-	detailW := maxInt(8, w-4)
-	overlayNeed := 0
-	if m.detail {
-		overlayNeed = len(m.detailContent(a, detailW)) + 2 // border rows
-	}
-	plan := planScreen(w, h, m.detail, filterOn, m.wait != "", addH, overlayNeed)
+	// The detail pane is planned like every other zone: open, it takes
+	// the space the shrunken list leaves (the dedicated detail view).
+	plan := planScreen(w, h, m.detail, filterOn, m.wait != "", addH)
 
 	// Table geometry: responsive columns from the terminal width and the
 	// visible content, then the rows styled and truncated to those widths.
@@ -96,17 +91,14 @@ func (m Model) render() string {
 		// grid (A6).
 		body = fitBlock(m.zeroAddonState(), plan.tableW, plan.tableH)
 	}
-	if plan.side {
-		body = joinBlocks(body, m.detailBlock(a, plan.detailW, plan.tableH))
-	}
 
 	var b strings.Builder
 	b.WriteString(m.headerBar(w))
 	b.WriteString("\n")
 	b.WriteString(body)
-	if plan.overlayH > 0 {
+	if plan.detailH > 0 {
 		b.WriteString("\n")
-		b.WriteString(m.detailOverlay(a, plan))
+		b.WriteString(m.detailPane(a, plan))
 	}
 	if plan.filterH > 0 {
 		b.WriteString("\n")
@@ -165,7 +157,8 @@ func (m Model) styledRows(plain [][]string, classes []statusClass, widths []int)
 	return rows
 }
 
-// plainCells renders one addon's five cells before truncation and styling.
+// plainCells renders one addon's six cells before truncation and styling:
+// name, acquisition source, the two versions, the strategy and the status.
 // The status cell always carries its glyph and its word, so meaning never
 // depends on the glyph or the color alone — except a live row, whose
 // per-row spinner is already its marker while the run decides the outcome.
@@ -179,6 +172,7 @@ func (m Model) plainCells(a service.AddonRow) ([]string, statusClass) {
 	}
 	return []string{
 		a.Name,
+		sourceLabel(a),
 		a.Installed,
 		a.Upstream,
 		service.StrategyLabel(state.Strategy(a.Strategy)),
@@ -246,10 +240,10 @@ func (m Model) addHeight() int {
 
 // detailContent renders the selected addon's detail: every table value at
 // full length (truncated cells reveal it here), the plain-language TOC
-// verdict, the owned directories and the source URL in full (selectable in
-// the terminal), the last sync's error and plan reason, and the installed
-// version's changelog — sanitized and clamped so upstream text cannot
-// corrupt the pane (R7).
+// verdict, the friendly acquisition source the Source column names, the
+// owned directories, the last sync's error and plan reason, and the
+// installed version's changelog — sanitized and clamped so upstream text
+// cannot corrupt the pane (R7).
 func (m Model) detailContent(a *service.AddonRow, width int) []string {
 	th := m.theme
 	if a == nil {
@@ -258,7 +252,7 @@ func (m Model) detailContent(a *service.AddonRow, width int) []string {
 	word := m.statusText(*a)
 	class := classifyStatus(word)
 	fields := []detailField{
-		{label: "Source", value: sourceText(a), style: th.dim},
+		{label: "Source", value: sourceLabel(*a), style: th.dim},
 		{label: "Tracking", value: dash(a.Tracking), style: th.dim},
 		{label: "Strategy", value: service.StrategyLabel(state.Strategy(a.Strategy)), style: th.dim},
 		{label: "Installed", value: dash(a.Installed), style: th.dim},
@@ -319,31 +313,21 @@ func renderFields(fields []detailField, width int, th theme) []string {
 	return lines
 }
 
-// detailBlock renders the persistent side detail pane: a vertical rule and
-// the selected addon's full values beside the table.
-func (m Model) detailBlock(a *service.AddonRow, contentW, height int) string {
-	lines := fitLines(m.detailContent(a, contentW), m.detailScroll, height, m.theme.g.Ellipsis)
-	block := make([]string, 0, height)
-	for i := 0; i < height; i++ {
-		line := ""
-		if i < len(lines) {
-			line = lines[i]
-		}
-		block = append(block, m.theme.rule+" "+padLine(clip(line, contentW, ""), contentW))
-	}
-	return strings.Join(block, "\n")
-}
-
-// detailOverlay renders the toggle-overlay detail pane for narrow
-// terminals: the same full values in a bordered box below the table.
-func (m Model) detailOverlay(a *service.AddonRow, plan screenPlan) string {
+// detailPane renders the expanded detail pane of the dedicated detail
+// view (XD-56): a bordered box below the shrunken list, taking the whole
+// remaining width and height so the selected addon's full values get the
+// screen. Short content pads out inside the box, long content scrolls.
+func (m Model) detailPane(a *service.AddonRow, plan screenPlan) string {
 	th := m.theme
-	contentW := maxInt(8, plan.width-4)
-	inner := plan.overlayH - 2
+	inner := plan.detailH - 2
 	if inner < 1 {
-		return fitBlock(th.dim.Render("no room for the detail pane"), plan.width, maxInt(1, plan.overlayH))
+		return fitBlock(th.dim.Render("no room for the detail pane"), plan.width, maxInt(1, plan.detailH))
 	}
+	contentW := plan.detailW
 	lines := fitLines(m.detailContent(a, contentW), m.detailScroll, inner, th.g.Ellipsis)
+	for len(lines) < inner {
+		lines = append(lines, "")
+	}
 	top := th.box.TopLeft + strings.Repeat(th.box.Top, contentW+2) + th.box.TopRight
 	bottom := th.box.BottomLeft + strings.Repeat(th.box.Bottom, contentW+2) + th.box.BottomRight
 	block := []string{top}
@@ -351,7 +335,7 @@ func (m Model) detailOverlay(a *service.AddonRow, plan screenPlan) string {
 		block = append(block, th.box.Left+" "+padLine(clip(line, contentW, ""), contentW)+" "+th.box.Right)
 	}
 	block = append(block, bottom)
-	return strings.Join(block, "\n")
+	return fitBlock(strings.Join(block, "\n"), plan.width, plan.detailH)
 }
 
 // detailViewport reports the detail pane's scroll geometry at the current
@@ -367,16 +351,8 @@ func (m Model) detailViewport() (lines []string, visible int) {
 		h = 24
 	}
 	a := m.selected()
-	contentW := maxInt(8, w-4)
-	need := 0
-	if m.detail {
-		need = len(m.detailContent(a, contentW)) + 2 // border rows
-	}
-	plan := planScreen(w, h, m.detail, m.filtering || m.filter != "", m.wait != "", m.addHeight(), need)
-	if plan.side {
-		return m.detailContent(a, plan.detailW), plan.tableH
-	}
-	return m.detailContent(a, contentW), plan.overlayH - 2
+	plan := planScreen(w, h, m.detail, m.filtering || m.filter != "", m.wait != "", m.addHeight())
+	return m.detailContent(a, plan.detailW), maxInt(1, plan.detailH-2)
 }
 
 // filterLine renders the active filter: the text being typed or applied
@@ -531,10 +507,13 @@ func (m Model) onboardingHelp(width int) string {
 }
 
 // addLine renders the add input line: the reference being typed with the
-// input cursor.
+// input cursor at its editing position (the cursor follows the arrow and
+// word-motion keys, so mid-line edits land where they should — XD-56).
 func (m Model) addLine(width int) string {
 	th := m.theme
-	line := th.dim.Render("add: ") + m.addText + th.accent.Render(th.g.Cursor)
+	runes := []rune(m.addText)
+	cur := clampInt(m.addCur, 0, len(runes))
+	line := th.dim.Render("add: ") + string(runes[:cur]) + th.accent.Render(th.g.Cursor) + string(runes[cur:])
 	return clip(line, width, th.g.Ellipsis)
 }
 
@@ -743,19 +722,6 @@ func fitHelpRows(rows []string, h int, ellipsis string) []string {
 	return rows
 }
 
-// joinBlocks concatenates two blocks line by line. Both are pre-fitted to
-// exact widths, so the columns line up.
-func joinBlocks(left, right string) string {
-	l := strings.Split(left, "\n")
-	r := strings.Split(right, "\n")
-	for i := range l {
-		if i < len(r) {
-			l[i] += r[i]
-		}
-	}
-	return strings.Join(l, "\n")
-}
-
 // fitLines clips a detail pane's lines to h rows at the scroll offset,
 // marking the cut with the ellipsis so the squeeze is visible. The offset
 // clamps to the last full page, so the pane can never scroll past the end
@@ -780,15 +746,28 @@ func dash(s string) string {
 	return s
 }
 
-// sourceText renders the addon's source for the detail pane: the full URL
-// when the service layer recorded one, so it can be selected and copied
-// straight from the terminal.
-func sourceText(a *service.AddonRow) string {
-	src := dash(a.Source)
-	if a.SourceKind != "" {
-		src += " (" + a.SourceKind + ")"
+// sourceLabel names how the addon was acquired — the value the Source
+// column shows and the detail pane's Source field repeats (XD-56): the
+// friendly acquisition source, "github release" for a release asset,
+// "github built" for a repository built from source, "curseforge" (never
+// the internal cfwidget name), "wago", or the plain provider name (a
+// generic git remote reads "git").
+func sourceLabel(a service.AddonRow) string {
+	switch state.SourceKind(a.SourceKind) {
+	case state.SourceGitHub:
+		switch state.Strategy(a.Strategy) {
+		case state.StrategyRelease:
+			return "github release"
+		case state.StrategySourcePkgmeta:
+			return "github built"
+		}
+		return "github"
+	case state.SourceCfwidget:
+		return "curseforge"
+	case "":
+		return "-"
 	}
-	return src
+	return a.SourceKind
 }
 
 // plainStatus expands the bare TOC verdict jargon into the plain-language

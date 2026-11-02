@@ -16,10 +16,10 @@ import (
 
 // Golden-terminal regression suite (XD-41): every screen state the P0
 // acceptance named — idle table, mid-sync frame (live rows + run frame +
-// rate-hint line), failed row persistence, the detail pane (wide side pane
-// and narrow overlay), the add flow's screens, and the ASCII / NO_COLOR
-// fallbacks — is rendered into a golden frame and compared byte for byte,
-// so unapproved visual drift fails the suite.
+// rate-hint line), failed row persistence, the expanded detail pane, the
+// add flow's screens, and the ASCII / NO_COLOR fallbacks — is rendered
+// into a golden frame and compared byte for byte, so unapproved visual
+// drift fails the suite.
 //
 // Determinism for CI (no timing flakiness):
 //
@@ -184,13 +184,16 @@ func addFlavorFrame(t *testing.T, m Model) Model {
 
 // detailChangelogFrame is the completed detail pane (XD-42): one addon
 // carrying the whole A3 story — changelog, plain-language TOC verdict,
-// owned dirs and the source URL — shown in the persistent side pane.
+// owned dirs and the acquisition source — shown in the expanded detail
+// view selection opens (XD-56).
 func detailChangelogFrame(t *testing.T, m Model) Model {
 	t.Helper()
 	row := detailRow()
 	m.rows = []service.AddonRow{row}
 	m.client.Addons = m.rows
 	m.results = nil // no sync result: the TOC verdict is the pane's story
+	m.detail = true // enter's dedicated detail view
+	m.detailFocus = true
 	return m
 }
 
@@ -249,11 +252,11 @@ func TestGoldenFrames(t *testing.T) {
 		twoClient bool
 		build     func(t *testing.T, m Model) Model
 	}{
-		// Idle table and the detail pane: persistent side pane at the
-		// wide width, toggle overlay below it.
+		// Idle table and the detail pane: the full list at every width,
+		// and the expanded detail view selection opens.
 		{"idle-80", color, 80, 28, false, nil},
-		{"idle-120-side-detail", color, 120, 28, false, nil},
-		{"detail-overlay-80", color, 80, 28, false, func(t *testing.T, m Model) Model {
+		{"idle-120", color, 120, 28, false, nil},
+		{"detail-expand-80", color, 80, 28, false, func(t *testing.T, m Model) Model {
 			m.detail = true
 			return m
 		}},
@@ -314,7 +317,7 @@ func TestGoldenFrames(t *testing.T) {
 
 		// ASCII variants: the whole frame degrades to the ASCII set.
 		{"idle-80-ascii", ascii, 80, 28, false, nil},
-		{"detail-overlay-80-ascii", ascii, 80, 28, false, func(t *testing.T, m Model) Model {
+		{"detail-expand-80-ascii", ascii, 80, 28, false, func(t *testing.T, m Model) Model {
 			m.detail = true
 			return m
 		}},
