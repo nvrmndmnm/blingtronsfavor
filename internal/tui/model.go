@@ -12,12 +12,12 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // Run opens the TUI. The context is signal-aware: SIGINT cancels an

@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/gitops"
-	"github.com/itp5b5/blessforge/internal/packager"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/gitops"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/packager"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // GitDirect builds addons straight from an arbitrary git remote — GitHub,

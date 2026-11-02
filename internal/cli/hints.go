@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // The "errors teach" pass (UX proposal B5): every user-facing error ends

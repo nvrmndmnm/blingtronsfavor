@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
 )
 
 func TestSelectAndVerdict(t *testing.T) {

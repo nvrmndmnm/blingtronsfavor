@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // splitTocTree runs the TOC flavor split on every top-level addon folder
@@ -175,4 +175,3 @@ func validateSubstituted(root string) error {
 // of the validation gate, so callers can tell a packaging bug from a layout
 // problem.
 var ErrIncompleteSubstitution = errors.New("incomplete keyword substitution")
-

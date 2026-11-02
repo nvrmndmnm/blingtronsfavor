@@ -12,8 +12,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // progressEvent is a test fixture: one event of a five-unit workload.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
 )
 
 // goldenSubst is the fixed substitution the golden fixtures were built with.

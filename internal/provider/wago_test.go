@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // fastScrape loosens the scrape pacing and retry knobs so fixture runs do

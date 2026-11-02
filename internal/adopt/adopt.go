@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/resolver"
-	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/resolver"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // Action is what adopt proposes for one addon family.

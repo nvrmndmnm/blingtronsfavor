@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/provider"
-	"github.com/itp5b5/blessforge/internal/resolver"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/provider"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/resolver"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // AddRef is one parsed add reference: the source kind the reference

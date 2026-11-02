@@ -9,11 +9,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/adopt"
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/adopt"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // bindFlags collects repeated --bind folder=owner/repo overrides (or

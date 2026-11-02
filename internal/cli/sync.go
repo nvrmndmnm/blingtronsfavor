@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // runSync implements "bfctl sync": it delegates to the shared service layer,

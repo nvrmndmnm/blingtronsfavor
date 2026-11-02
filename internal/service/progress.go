@@ -3,8 +3,8 @@ package service
 import (
 	"sync"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
 )
 
 // Phase names one step of a unit's progress through a run.

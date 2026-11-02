@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 func runInit(args []string, _ BuildInfo) int {

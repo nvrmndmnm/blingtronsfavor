@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // fakeSync replaces the service call: it reports the run options the key

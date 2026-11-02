@@ -19,7 +19,7 @@ import (
 // transient failure shapes (429 and 5xx) a scraper must expect.
 var (
 	// scrapeUserAgent identifies bfctl to the scraped services.
-	scrapeUserAgent = "bfctl/1 (WoW addon manager; +https://github.com/itp5b5/blessforge)"
+	scrapeUserAgent = "bfctl/1 (WoW addon manager; +https://github.com/nvrmndmnm/blingtronsfavor)"
 
 	// scrapeInterval is the minimum gap between two scrape requests.
 	// Tests lower it so fixture runs do not sleep.

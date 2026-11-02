@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // defaultTukuiAPI is the Tukui package endpoint both the ElvUI/Tukui UIs and

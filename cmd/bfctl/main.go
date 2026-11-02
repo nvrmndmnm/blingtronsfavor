@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/itp5b5/blessforge/internal/cli"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/cli"
 )
 
 // Build metadata, injected at link time via -ldflags.

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"text/tabwriter"
 
-	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/tui"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/tui"
 )
 
 // statusFixture is one client section exercising every status class of the

@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
 )
 
 // maxMetaBytes caps a release.json download: the metadata is a small asset

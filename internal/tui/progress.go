@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // liveRow is one addon's live status inside a running sync: the phase its

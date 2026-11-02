@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 
-	"github.com/itp5b5/blessforge/internal/resolver"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/resolver"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // resize sends one window size through Update.

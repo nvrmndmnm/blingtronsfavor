@@ -13,8 +13,8 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // PTY regression suite (XD-41): the CLI live block runs against a real

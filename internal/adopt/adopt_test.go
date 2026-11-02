@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // fixtureDir is the Interface/AddOns tree of the fixture WoW root: the five

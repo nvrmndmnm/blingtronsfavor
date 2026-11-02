@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // stage is a temporary directory created inside the directory that contains

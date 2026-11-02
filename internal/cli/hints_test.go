@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // TestNextStepFor pins the derived next steps of the "errors teach" pass:

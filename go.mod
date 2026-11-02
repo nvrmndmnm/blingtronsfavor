@@ -1,4 +1,4 @@
-module github.com/itp5b5/blessforge
+module github.com/nvrmndmnm/blingtronsfavor
 
 go 1.27.2
 

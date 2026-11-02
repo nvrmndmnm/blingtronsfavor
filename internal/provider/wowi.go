@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // defaultWoWIAPI is the WoWInterface addon endpoint: a JSON lookup keyed by

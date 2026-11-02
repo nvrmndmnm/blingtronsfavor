@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/installer"
-	"github.com/itp5b5/blessforge/internal/provider"
-	"github.com/itp5b5/blessforge/internal/resolver"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/installer"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/provider"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/resolver"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // SyncOptions configures one Sync run.

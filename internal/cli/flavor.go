@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // The shared --flavor contract: every command that acts on a client flavor

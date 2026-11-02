@@ -4,9 +4,9 @@ import (
 	"log/slog"
 	"sort"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // AddonRow is one addon in a status report. The strings are display-ready:

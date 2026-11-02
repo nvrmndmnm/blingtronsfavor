@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // The display vocabulary audit (XD-48): the TUI labels progress states

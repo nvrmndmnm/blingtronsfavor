@@ -3,8 +3,8 @@ package cli
 import (
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/adopt"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/adopt"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // TestBindFlags checks the repeatable --bind folder=owner/repo override.

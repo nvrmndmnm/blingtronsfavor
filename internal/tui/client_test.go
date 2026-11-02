@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbletea/v2"
+	tea "charm.land/bubbletea/v2"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/service"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // Screen-level acceptance tests for the multi-client flavor switch (P2-1):

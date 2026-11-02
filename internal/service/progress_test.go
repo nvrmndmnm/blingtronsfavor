@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
 )
 
 // TestProgressSinkSerializesConcurrentEmit pins the delivery contract

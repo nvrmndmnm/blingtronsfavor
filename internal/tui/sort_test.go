@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // sortFixture builds four addons whose names, statuses and upstream

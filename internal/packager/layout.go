@@ -15,9 +15,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/gitops"
-	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/gitops"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
 )
 
 // Spec is one source build request: the addon repository and the ref to
@@ -83,9 +83,9 @@ type Result struct {
 //     every .toc, .lua and .xml file;
 //  9. TOC flavor split: exactly one "<folder>.toc" per staged folder, with
 //     "## Interface:" rewritten to the detected client's interface;
-// 10. run the post-build validation gate (matching .toc per folder,
+//  10. run the post-build validation gate (matching .toc per folder,
 //     interface match, no leftover @project- token);
-// 11. commit the finished top-level folders into OutDir.
+//  11. commit the finished top-level folders into OutDir.
 //
 // Every step works in a private temporary directory and only step 8 writes
 // OutDir, so any failure leaves no partial install behind.

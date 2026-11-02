@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // sortMode is the active row ordering. "o" cycles name → status →

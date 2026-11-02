@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/itp5b5/blessforge/internal/tui"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/tui"
 )
 
 // runTUI implements "bfctl tui" (and the bare "bfctl" on a terminal): it

@@ -7,8 +7,8 @@ package service
 import (
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // lockTimeout is how long a state write waits for the state lock before

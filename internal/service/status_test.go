@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // TestAddonStatusWorstVerdictAndBuiltFor pins addonStatus's contract: the

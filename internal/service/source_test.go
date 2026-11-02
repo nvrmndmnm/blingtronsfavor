@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/client"
-	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/resolver"
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/resolver"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // requireGit skips the fixture-driven source build tests when git is not

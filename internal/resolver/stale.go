@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/github"
-	"github.com/itp5b5/blessforge/internal/gitops"
-	"github.com/itp5b5/blessforge/internal/state"
-	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/github"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/gitops"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/toc"
 )
 
 // trackingRelease pins an addon to the release strategy (the recorded form of

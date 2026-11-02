@@ -14,8 +14,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/itp5b5/blessforge/internal/gitops"
-	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/gitops"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
 )
 
 // ErrSvnMissing is wrapped into errors returned for an svn external when no

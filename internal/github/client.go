@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/itp5b5/blessforge/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
 )
 
 const (

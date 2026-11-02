@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/client"
 )
 
 // suffixesByFlavor maps every client flavor to its accepted flavor-specific

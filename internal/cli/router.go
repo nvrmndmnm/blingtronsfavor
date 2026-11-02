@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/itp5b5/blessforge/internal/paths"
-	"github.com/itp5b5/blessforge/internal/service"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/paths"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/service"
 )
 
 // BuildInfo carries version metadata injected at link time via -ldflags.

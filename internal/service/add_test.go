@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/itp5b5/blessforge/internal/state"
+	"github.com/nvrmndmnm/blingtronsfavor/internal/state"
 )
 
 // TestParseWagoRef pins the accepted Wago reference shapes: the addon page
