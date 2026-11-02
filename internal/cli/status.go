@@ -26,8 +26,8 @@ import (
 func runStatus(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("status")
 	scanDir := fs.String("scan", "", "scan an AddOns directory and report .toc selection and compatibility per addon")
-	scanFlavor := fs.String("flavor", "", "client flavor for --scan: mainline, forever (a.k.a. camelot), classic or mists")
-	scanInterface := fs.Int("interface", 0, "client interface number for --scan")
+	flavorFlag := registerFlavorFlag(fs, scopedFlavorUsage)
+	scanInterface := fs.Int("interface", 0, "client interface number for --scan (requires --flavor, which pins the target client)")
 	offline := fs.Bool("offline", false, "no network access: drop the Upstream column")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
 	if code, ok := parseSubcommand(fs, args); !ok {
@@ -43,12 +43,17 @@ func runStatus(args []string, _ BuildInfo) int {
 			fmt.Fprintln(os.Stderr, "bfctl status: --json and --scan cannot be combined — pass only one of them")
 			return ExitUsage
 		}
-		return runScan(expandPathFlag("scan", *scanDir), *scanFlavor, *scanInterface)
+		return runScan(expandPathFlag("scan", *scanDir), *flavorFlag, *scanInterface)
+	}
+	flavor, err := scopedFlavor(*flavorFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bfctl status: %v\n", err)
+		return ExitUsage
 	}
 	if *jsonOut {
-		return runStatusJSON()
+		return runStatusJSON(flavor)
 	}
-	return runStatusTable(*offline)
+	return runStatusTable(*offline, flavor)
 }
 
 // statusView is the presentation mode of "bfctl status": on a terminal the
@@ -67,14 +72,36 @@ func statusViewFor(f *os.File) statusView {
 	return statusView{tty: tty, color: tty && os.Getenv("NO_COLOR") == ""}
 }
 
-// runStatusTable renders the managed addons of every recorded client flavor
-// as one table per flavor.
-func runStatusTable(offline bool) int {
+// runStatusTable renders the managed addons of the recorded client flavors
+// as one table per flavor — scoped to one flavor when --flavor names it.
+func runStatusTable(offline bool, flavor client.Flavor) int {
 	st, err := service.LoadStatus()
 	if err != nil {
 		return fail("status", err, ExitError)
 	}
-	return printStatusTables(st, offline, statusViewFor(os.Stdout))
+	return printStatusTables(filterStatus(st, flavor), offline, statusViewFor(os.Stdout))
+}
+
+// filterStatus scopes the report to one client flavor — the --flavor
+// target — leaving it untouched when no flavor is named. The flat addons
+// list is filtered alongside the per-flavor grouping so every output shape
+// agrees on the scope.
+func filterStatus(st service.Status, flavor client.Flavor) service.Status {
+	if flavor == "" {
+		return st
+	}
+	out := service.Status{Clients: []service.ClientRow{}, Addons: []service.AddonRow{}}
+	for _, cs := range st.Clients {
+		if cs.Flavor == string(flavor) {
+			out.Clients = append(out.Clients, cs)
+		}
+	}
+	for _, a := range st.Addons {
+		if a.Flavor == string(flavor) {
+			out.Addons = append(out.Addons, a)
+		}
+	}
+	return out
 }
 
 // printStatusTables renders the report's per-flavor tables. On a terminal
@@ -119,12 +146,14 @@ func printFreshness(line string, color bool) {
 }
 
 // runStatusJSON prints the machine-readable status report: one flat "addons"
-// array plus the per-flavor "clients" grouping, ready for jq.
-func runStatusJSON() int {
+// array plus the per-flavor "clients" grouping, ready for jq — scoped to
+// one flavor when --flavor names it.
+func runStatusJSON(flavor client.Flavor) int {
 	st, err := service.LoadStatus()
 	if err != nil {
 		return fail("status", err, ExitError)
 	}
+	st = filterStatus(st, flavor)
 	if st.Clients == nil {
 		st.Clients = []service.ClientRow{}
 	}
@@ -286,20 +315,26 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 }
 
 // scanTarget resolves the client side of a --scan: explicit --flavor and
-// --interface win, otherwise the first recorded client (sorted by flavor) is
-// re-detected so a game patch is reflected immediately, falling back to its
-// recorded interface. With no recorded client the scan only lists the
-// selection and reports Unknown verdicts.
+// --interface pin the target client, --flavor alone selects the recorded
+// client of that flavor (re-detected so a game patch is reflected
+// immediately, falling back to its recorded interface), and with neither
+// flag the single recorded client is used. With several recorded clients
+// and no --flavor the error lists them — a verdict needs one target client
+// — and with no recorded client at all the scan only lists the selection
+// and reports Unknown verdicts.
 func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
-	if flavorFlag != "" || interfaceFlag != 0 {
-		if flavorFlag == "" || interfaceFlag == 0 {
-			return nil, errors.New("--flavor and --interface must be passed together — pass both or neither")
+	if interfaceFlag != 0 && flavorFlag == "" {
+		return nil, errors.New("--interface requires --flavor — pass both or neither")
+	}
+	if flavorFlag != "" {
+		flavor, err := parseFlavor(flavorFlag)
+		if err != nil {
+			return nil, err
 		}
-		flavor, ok := client.FlavorForKey(flavorFlag)
-		if !ok {
-			return nil, fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists; \"camelot\" is an accepted spelling of forever)", flavorFlag)
+		if interfaceFlag != 0 {
+			return &toc.Target{Flavor: flavor, Interface: interfaceFlag}, nil
 		}
-		return &toc.Target{Flavor: flavor, Interface: interfaceFlag}, nil
+		return recordedTarget(flavor)
 	}
 	st, err := loadState()
 	if err != nil {
@@ -309,17 +344,42 @@ func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
 		return nil, nil
 	}
 	clients := sortedClients(st)
-	if len(clients) == 0 {
+	switch len(clients) {
+	case 0:
 		return nil, nil
+	case 1:
+		return detectedTarget(clients[0])
+	default:
+		return nil, fmt.Errorf("several clients configured (%s): pass --flavor", clientList(clients))
 	}
-	cs := clients[0]
+}
+
+// recordedTarget selects the configured client of one flavor for a scan:
+// the flavor must be configured (the shared --flavor contract), then its
+// install is re-detected like the unscoped path does.
+func recordedTarget(flavor client.Flavor) (*toc.Target, error) {
+	st, err := loadState()
+	if err != nil {
+		return nil, err
+	}
+	cs := st.Client(flavor)
+	if cs == nil {
+		return nil, fmt.Errorf("no client configured for flavor %s: run \"bfctl init\" first", flavor)
+	}
+	return detectedTarget(cs)
+}
+
+// detectedTarget re-detects the recorded client so a game patch shows up
+// at once, falling back to its recorded interface. When neither is
+// available the error names the pin that always works.
+func detectedTarget(cs *state.ClientState) (*toc.Target, error) {
 	install, err := client.Detect(cs.Root)
 	if err != nil {
 		slog.Debug("detect recorded client", "root", cs.Root, "error", err)
 		if cs.Interface != 0 {
 			return &toc.Target{Flavor: cs.Flavor, Interface: cs.Interface}, nil
 		}
-		return nil, nil
+		return nil, fmt.Errorf("cannot determine the interface for flavor %s: pass --flavor/--interface to pin the target client", cs.Flavor)
 	}
 	return &toc.Target{Flavor: install.Flavor, Interface: install.Interface}, nil
 }

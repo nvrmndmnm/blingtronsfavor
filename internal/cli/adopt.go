@@ -53,7 +53,7 @@ func runAdopt(args []string, bi BuildInfo) int {
 	pathFlag := fs.String("path", "", "addon directory to scan (default: the configured client's Interface/AddOns)")
 	yesFlag := fs.Bool("yes", false, "write the proposed bindings into the state (default is a dry run)")
 	dryRunFlag := fs.Bool("dry-run", false, "only print the proposed bindings (the default)")
-	flavorFlag := fs.String("flavor", "", "client flavor to adopt for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
+	flavorFlag := registerFlavorFlag(fs, requiredFlavorUsage)
 	binds := bindFlags{}
 	fs.Var(binds, "bind", "bind one folder explicitly as folder=owner/repo or folder=cfwidget:<projectId> (repeatable)")
 	progress := registerProgressFlag(fs)

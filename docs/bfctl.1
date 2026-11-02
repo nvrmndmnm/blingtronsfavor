@@ -1,4 +1,4 @@
-.Dd October 28, 2026
+.Dd November 2, 2026
 .Dt BFCTL 1
 .Os
 .Sh NAME
@@ -11,21 +11,26 @@
 .Nm
 .Cm add Ar source Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force Op Fl -progress Ar mode
 .Nm
+.Cm adopt Op Fl -flavor Ar flavor Op Fl -yes
+.Nm
 .Cm remove Ar id Op Fl -flavor Ar flavor
 .Nm
 .Cm sync
+.Op Fl -flavor Ar flavor
 .Op Fl -check-only
 .Op Fl -explain
 .Op Fl -json
 .Op Fl -progress Ar mode
 .Nm
 .Cm status
+.Op Fl -flavor Ar flavor
 .Op Fl -json
 .Op Fl -offline
 .Nm
 .Cm status
 .Fl -scan Ar dir
-.Op Fl -flavor Ar flavor Fl -interface Ar number
+.Op Fl -flavor Ar flavor
+.Op Fl -interface Ar number
 .Nm
 .Cm tui
 .Nm
@@ -92,9 +97,14 @@ is accepted as a spelling of
 takes over addon directories owned by another addon.
 .It Cm remove Ar id
 Remove the addon's owned directories and drop its manifest entry, atomically.
+.Fl -flavor
+selects the client when the addon is installed for several.
 .It Cm adopt
 Take over an existing addon installation: bind its directories to bfctl
 management, or re-bind an addon installed by a foreign tool.
+.Fl -flavor
+selects the client when several are configured
+.Pq camelot is accepted as a spelling of forever .
 .It Cm sync
 Resolve every managed addon against its upstream and install updates.
 Addons are worked concurrently and their results are reported in report
@@ -104,6 +114,9 @@ local source build
 .Pq .pkgmeta externals, keyword substitution, TOC flavor split
 when no asset does or the releases are stale.
 Never prompts: suitable for launch scripts and cron.
+.Fl -flavor
+scopes the run to one configured client flavor
+.Pq the default runs every configured flavor; the same per-client scope the TUI's flavor switch targets ,
 .Fl -check-only
 reports without downloading,
 .Fl -explain
@@ -125,11 +138,14 @@ is printed above the table; redirected output is plain and unchanged.
 .Fl -json
 prints a machine-readable report,
 .Fl -offline
-drops the Upstream column.
+drops the Upstream column, and
+.Fl -flavor
+shows one client's section only
+.Pq the same target the TUI's flavor switch selects .
 .Fl -scan Ar dir
 lists a bare AddOns directory with its selected .toc files and compatibility
 verdicts
-.Pq Fl -flavor Ns / Ns Fl -interface pin the target client .
+.Pq Fl -flavor selects the configured client; Fl -interface pins its interface; with several configured clients Fl -flavor is required .
 .It Cm tui
 Open the interactive addon manager: an addon table
 .Pq Addon, Source, Installed, Upstream, Strategy, Status
@@ -445,6 +461,13 @@ bfctl status
 JSON for scripting:
 .Bd -literal -offset indent
 bfctl status --json | jq -r '.addons[] | [.name, .status] | @tsv'
+.Ed
+.Pp
+Target one client flavor
+.Pq camelot is the same client as forever :
+.Bd -literal -offset indent
+bfctl sync --flavor forever
+bfctl status --flavor camelot
 .Ed
 .Pp
 Launch script

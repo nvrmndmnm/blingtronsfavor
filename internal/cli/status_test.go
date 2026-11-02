@@ -125,7 +125,7 @@ func TestStatusFreshnessLineTTYOnly(t *testing.T) {
 func TestStatusPipeOutputStaysPlain(t *testing.T) {
 	testSyncState(t, manualAddon())
 	var code int
-	stdout := captureStdout(t, func() { code = runStatusTable(false) })
+	stdout := captureStdout(t, func() { code = runStatusTable(false, "") })
 	if code != ExitOK {
 		t.Errorf("runStatusTable() = %d, want %d", code, ExitOK)
 	}

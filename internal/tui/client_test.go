@@ -115,6 +115,31 @@ func TestSingleClientIgnoresSwitchKeys(t *testing.T) {
 	}
 }
 
+// TestActiveFlavorSurvivesSnapshotReload pins the switch's consistency
+// across a snapshot reload: the flavor the user switched to keeps its
+// table rows and its header badge when a finished sync or refresh lands a
+// fresh status report.
+func TestActiveFlavorSurvivesSnapshotReload(t *testing.T) {
+	m := testModelFlavors(t, client.FlavorClassic, client.FlavorForever)
+	m = press(t, m, tabKey())
+	if m.client.Flavor != string(client.FlavorForever) {
+		t.Fatalf("tab: active flavor = %q, want forever", m.client.Flavor)
+	}
+	// A fresh snapshot lands — the loadStatus command every finished run
+	// and refresh returns.
+	next, _ := m.Update(loadStatus()())
+	m = next.(Model)
+	if m.client.Flavor != string(client.FlavorForever) {
+		t.Fatalf("snapshot reload moved the active flavor to %q", m.client.Flavor)
+	}
+	if len(m.rows) != 1 || m.rows[0].ID != "foreverAddon" {
+		t.Fatalf("rows after reload = %+v, want the forever client's addon", m.rows)
+	}
+	if !strings.Contains(m.headerBar(80), "Forever") {
+		t.Fatalf("header after reload does not name the active flavor:\n%s", m.headerBar(80))
+	}
+}
+
 func TestClientSwitchRefusedMidSync(t *testing.T) {
 	m := testModelFlavors(t, client.FlavorClassic, client.FlavorForever)
 	m.syncing = true
