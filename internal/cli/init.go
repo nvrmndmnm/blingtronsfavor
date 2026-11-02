@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/itp5b5/blessforge/internal/paths"
@@ -22,8 +21,7 @@ func runInit(args []string, _ BuildInfo) int {
 		// guided picker runs behind the scenes (R5) — one implementation.
 		outcome, err := service.Init(*flavorDir)
 		if err != nil {
-			slog.Error("init client", "error", err)
-			return ExitError
+			return failHint("init", fmt.Errorf("init client: %w", err), ExitError, `pass the World of Warcraft flavor directory (e.g. .../World of Warcraft/_forever_)`)
 		}
 		fmt.Printf("detected %s\n", outcome.Install.Badge())
 		if outcome.Replaced != "" {
@@ -35,17 +33,14 @@ func runInit(args []string, _ BuildInfo) int {
 	}
 	cfgDir, err := paths.ConfigDir()
 	if err != nil {
-		slog.Error("resolve config dir", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("resolve config dir: %w", err), ExitError, hintHome)
 	}
 	if err := paths.EnsureLayout(); err != nil {
-		slog.Error("create bfctl directories", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("create bfctl directories: %w", err), ExitError, `check that ~/.config and ~/.cache are writable`)
 	}
 	statePath, err := paths.StateFile()
 	if err != nil {
-		slog.Error("resolve state file", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("resolve state file: %w", err), ExitError, hintHome)
 	}
 	store := state.Open(statePath)
 	_, err = os.Stat(statePath)
@@ -54,12 +49,10 @@ func runInit(args []string, _ BuildInfo) int {
 		fmt.Printf("bfctl already initialised in %s\n", cfgDir)
 		return ExitOK
 	case !errors.Is(err, os.ErrNotExist):
-		slog.Error("inspect state file", "error", err)
-		return ExitError
+		return fail("init", fmt.Errorf("inspect state file: %w", err), ExitError)
 	}
 	if err := store.Save(state.New()); err != nil {
-		slog.Error("write state file", "error", err)
-		return ExitError
+		return failHint("init", fmt.Errorf("write state file: %w", err), ExitError, `check that the bfctl config directory is writable`)
 	}
 	fmt.Printf("initialised bfctl in %s\n", cfgDir)
 	return ExitOK

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,12 +12,15 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf8"
 
+	"charm.land/lipgloss/v2"
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
 	"github.com/itp5b5/blessforge/internal/toc"
+	"github.com/itp5b5/blessforge/internal/tui"
 )
 
 func runStatus(args []string, _ BuildInfo) int {
@@ -30,13 +34,13 @@ func runStatus(args []string, _ BuildInfo) int {
 		return code
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "bfctl status: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(os.Stderr, "bfctl status: unexpected argument %q — usage: bfctl status [flags]\n", fs.Arg(0))
 		subcommandUsage(fs)
 		return ExitUsage
 	}
 	if *scanDir != "" {
 		if *jsonOut {
-			fmt.Fprintln(os.Stderr, "bfctl status: --json and --scan cannot be combined")
+			fmt.Fprintln(os.Stderr, "bfctl status: --json and --scan cannot be combined — pass only one of them")
 			return ExitUsage
 		}
 		return runScan(expandPathFlag("scan", *scanDir), *scanFlavor, *scanInterface)
@@ -47,25 +51,71 @@ func runStatus(args []string, _ BuildInfo) int {
 	return runStatusTable(*offline)
 }
 
+// statusView is the presentation mode of "bfctl status": on a terminal the
+// table is colorized with the shared status color language and topped by
+// the freshness line; in pipes and under NO_COLOR the historical plain
+// output is produced byte for byte.
+type statusView struct {
+	tty   bool // stdout is a terminal: show the freshness line
+	color bool // colorize the status cells (tty and NO_COLOR unset)
+}
+
+// statusViewFor derives the presentation mode from the output stream:
+// terminal output is decorated, redirected output stays plain.
+func statusViewFor(f *os.File) statusView {
+	tty := streamIsTTY(f)
+	return statusView{tty: tty, color: tty && os.Getenv("NO_COLOR") == ""}
+}
+
 // runStatusTable renders the managed addons of every recorded client flavor
 // as one table per flavor.
 func runStatusTable(offline bool) int {
 	st, err := service.LoadStatus()
 	if err != nil {
-		slog.Error("read state", "error", err)
-		return ExitError
+		return fail("status", err, ExitError)
 	}
+	return printStatusTables(st, offline, statusViewFor(os.Stdout))
+}
+
+// printStatusTables renders the report's per-flavor tables. On a terminal
+// the freshness line comes first — the snapshot is checked live in this
+// run — and the status cells carry the shared status color language; plain
+// output (pipes, NO_COLOR) is the historical table unchanged.
+func printStatusTables(st service.Status, offline bool, view statusView) int {
 	if len(st.Clients) == 0 {
 		fmt.Println("no addons configured")
 		return ExitOK
+	}
+	if view.tty {
+		printFreshness(freshnessLine(!offline), view.color)
 	}
 	for i, cs := range st.Clients {
 		if i > 0 {
 			fmt.Println()
 		}
-		printClientStatus(cs, offline)
+		printClientStatus(cs, offline, view)
 	}
 	return ExitOK
+}
+
+// freshnessLine is the "checked just now" context of the status report:
+// the snapshot is assembled live in this run (the TOC verdicts come from a
+// scan of the AddOns directory right now), while the Upstream column only
+// knows what the last update recorded.
+func freshnessLine(upstream bool) string {
+	if upstream {
+		return "checked just now — TOC verdicts are live; the Upstream column is from the last update"
+	}
+	return "checked just now — TOC verdicts are live"
+}
+
+// printFreshness prints the freshness line: dimmed under color (the TUI's
+// dim), bare words under NO_COLOR — the words always carry the meaning.
+func printFreshness(line string, color bool) {
+	if color {
+		line = lipgloss.NewStyle().Faint(true).Render(line)
+	}
+	fmt.Println(line)
 }
 
 // runStatusJSON prints the machine-readable status report: one flat "addons"
@@ -73,8 +123,7 @@ func runStatusTable(offline bool) int {
 func runStatusJSON() int {
 	st, err := service.LoadStatus()
 	if err != nil {
-		slog.Error("read state", "error", err)
-		return ExitError
+		return fail("status", err, ExitError)
 	}
 	if st.Clients == nil {
 		st.Clients = []service.ClientRow{}
@@ -84,8 +133,7 @@ func runStatusJSON() int {
 	}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
-		slog.Error("encode status JSON", "error", err)
-		return ExitError
+		return fail("status", err, ExitError)
 	}
 	fmt.Println(string(data))
 	return ExitOK
@@ -97,8 +145,10 @@ func runStatusJSON() int {
 //	Addon | Version | Strategy | Dirs | TOC | Upstream
 //
 // The Upstream column (the last upstream tag the resolver saw) is only shown
-// with network access; --offline drops it entirely.
-func printClientStatus(cs service.ClientRow, offline bool) {
+// with network access; --offline drops it entirely. With color the TOC
+// cells carry the shared status color language; without it the rows go
+// through text/tabwriter exactly as they always have.
+func printClientStatus(cs service.ClientRow, offline bool, view statusView) {
 	badge := cs.FlavorName
 	if cs.Interface != 0 {
 		badge = fmt.Sprintf("%s (Interface %d)", badge, cs.Interface)
@@ -109,24 +159,87 @@ func printClientStatus(cs service.ClientRow, offline bool) {
 		return
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	if offline {
-		_, _ = fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC")
-	} else {
-		_, _ = fmt.Fprintln(w, "Addon\tVersion\tStrategy\tDirs\tTOC\tUpstream")
+	header := []string{"Addon", "Version", "Strategy", "Dirs", "TOC"}
+	if !offline {
+		header = append(header, "Upstream")
 	}
+	rows := make([][]string, 0, len(cs.Addons))
 	for _, a := range cs.Addons {
 		dirs := "-"
 		if len(a.Dirs) > 0 {
 			dirs = strings.Join(a.Dirs, ", ")
 		}
-		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s", a.Name, a.Installed, a.Strategy, dirs, a.Status)
+		row := []string{a.Name, a.Installed, a.Strategy, dirs, a.Status}
 		if !offline {
-			row += "\t" + a.Upstream
+			row = append(row, a.Upstream)
 		}
-		_, _ = fmt.Fprintln(w, row)
+		rows = append(rows, row)
 	}
-	_ = w.Flush()
+	printStatusTable(os.Stdout, header, rows, 4, view.color)
+}
+
+// tablePad is the column padding of the status table — text/tabwriter's
+// padding parameter.
+const tablePad = 2
+
+// printStatusTable renders one status table. Without color the rows go
+// through text/tabwriter exactly as they always have, so redirected output
+// stays byte-identical. With color the cell in statusCol is wrapped in the
+// shared status color language and the columns are padded from the plain
+// text rune widths — text/tabwriter's measure — so ANSI styling can never
+// shift a column.
+func printStatusTable(w io.Writer, header []string, rows [][]string, statusCol int, color bool) {
+	if !color {
+		tw := tabwriter.NewWriter(w, 0, 4, tablePad, ' ', 0)
+		_, _ = fmt.Fprintln(tw, strings.Join(header, "\t"))
+		for _, row := range rows {
+			_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
+		}
+		_ = tw.Flush()
+		return
+	}
+	lines := append([][]string{header}, rows...)
+	widths := columnWidths(lines)
+	for i, cells := range lines {
+		col := statusCol
+		if i == 0 {
+			col = -1 // the header labels stay plain
+		}
+		for j, cell := range cells {
+			text := cell
+			if j == col {
+				text = tui.ColorizeStatus(cell, true)
+			}
+			if j == len(cells)-1 {
+				_, _ = fmt.Fprint(w, text)
+				break
+			}
+			_, _ = fmt.Fprint(w, text, strings.Repeat(" ", widths[j]-utf8.RuneCountInString(cell)))
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+}
+
+// columnWidths returns the width of every aligned column: the widest cell
+// in runes plus the padding, the text/tabwriter measure. The trailing cell
+// of each row is written verbatim (as text/tabwriter does) and gets no
+// width.
+func columnWidths(lines [][]string) []int {
+	var widths []int
+	for _, cells := range lines {
+		for i, cell := range cells {
+			if i == len(cells)-1 {
+				break
+			}
+			for len(widths) <= i {
+				widths = append(widths, 0)
+			}
+			if w := utf8.RuneCountInString(cell) + tablePad; w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	return widths
 }
 
 // runScan lists every addon directory under dir with its selected .toc, its
@@ -137,20 +250,23 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 		fmt.Fprintf(os.Stderr, "bfctl status: %v\n", err)
 		return ExitUsage
 	}
+	view := statusViewFor(os.Stdout)
 	addons, err := toc.Scan(dir, target)
 	if err != nil {
-		slog.Error("scan addons", "dir", dir, "error", err)
-		return ExitError
+		return failHint("status", err, ExitError, fmt.Sprintf("check that %s is a readable AddOns directory", dir))
 	}
 	if len(addons) == 0 {
 		fmt.Printf("no addons found in %s\n", dir)
 		return ExitOK
 	}
-	if target == nil {
-		fmt.Fprintln(os.Stderr, "bfctl status: no client configured; pass --flavor/--interface or run bfctl init --path ... (verdicts shown as Unknown)")
+	if view.tty {
+		printFreshness(freshnessLine(false), view.color)
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "Addon\tTOC\tInterfaces\tVerdict")
+	if target == nil {
+		fmt.Fprintln(os.Stderr, "bfctl status: no client configured — verdicts shown as Unknown; pass --flavor/--interface or run bfctl init --path ...")
+	}
+	header := []string{"Addon", "TOC", "Interfaces", "Verdict"}
+	rows := make([][]string, 0, len(addons))
 	for _, addon := range addons {
 		tocName, interfaces := "-", "-"
 		if addon.Toc != nil {
@@ -163,9 +279,9 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 				interfaces = strings.Join(parts, " ")
 			}
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", addon.Dir, tocName, interfaces, addon.Verdict)
+		rows = append(rows, []string{addon.Dir, tocName, interfaces, addon.Verdict.String()})
 	}
-	_ = w.Flush()
+	printStatusTable(os.Stdout, header, rows, 3, view.color)
 	return ExitOK
 }
 
@@ -177,7 +293,7 @@ func runScan(dir, flavorFlag string, interfaceFlag int) int {
 func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
 	if flavorFlag != "" || interfaceFlag != 0 {
 		if flavorFlag == "" || interfaceFlag == 0 {
-			return nil, errors.New("--flavor and --interface must be passed together")
+			return nil, errors.New("--flavor and --interface must be passed together — pass both or neither")
 		}
 		flavor, ok := client.FlavorForKey(flavorFlag)
 		if !ok {
@@ -187,7 +303,9 @@ func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
 	}
 	st, err := loadState()
 	if err != nil {
-		slog.Error("read state", "error", err)
+		// A state read failure degrades the scan to Unknown verdicts, but
+		// the error still teaches its fix before the scan continues.
+		fmt.Fprintf(os.Stderr, "bfctl status: %v\n", err)
 		return nil, nil
 	}
 	clients := sortedClients(st)
@@ -206,13 +324,19 @@ func scanTarget(flavorFlag string, interfaceFlag int) (*toc.Target, error) {
 	return &toc.Target{Flavor: install.Flavor, Interface: install.Interface}, nil
 }
 
-// loadState loads the state from the default state file.
+// loadState loads the state from the default state file. Its errors carry
+// their next step: a state read failure names the fix for the file it
+// names, a path resolution failure points at HOME.
 func loadState() (*state.State, error) {
 	path, err := paths.StateFile()
 	if err != nil {
-		return nil, err
+		return nil, withHint(fmt.Errorf("resolve state file: %w", err), hintHome)
 	}
-	return state.Open(path).Load()
+	st, err := state.Open(path).Load()
+	if err != nil {
+		return nil, withHint(err, hintStateFile)
+	}
+	return st, nil
 }
 
 // sortedClients returns the recorded clients sorted by flavor name, so the

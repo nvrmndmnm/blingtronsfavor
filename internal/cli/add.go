@@ -39,7 +39,7 @@ func runAdd(args []string, bi BuildInfo) int {
 		return code
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "bfctl add: expected exactly one repository reference")
+		fmt.Fprintln(os.Stderr, "bfctl add: expected exactly one repository reference — usage: bfctl add <source>")
 		subcommandUsage(fs)
 		return ExitUsage
 	}
@@ -52,7 +52,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	// provider-backed reference rejects them before touching state or the
 	// network.
 	if ref.Kind != state.SourceGitHub && (*branchFlag != "" || *strategyFlag != "") {
-		fmt.Fprintln(os.Stderr, "bfctl add: --branch and --strategy only apply to GitHub repositories")
+		fmt.Fprintln(os.Stderr, "bfctl add: --branch and --strategy only apply to GitHub repositories — drop them, or add a GitHub owner/repo reference")
 		return ExitUsage
 	}
 	tracking := "stable"
@@ -63,12 +63,12 @@ func runAdd(args []string, bi BuildInfo) int {
 	case "":
 	case "release":
 		if *branchFlag != "" {
-			fmt.Fprintln(os.Stderr, "bfctl add: --strategy release and --branch are mutually exclusive")
+			fmt.Fprintln(os.Stderr, "bfctl add: --strategy release and --branch are mutually exclusive — pass only one of them")
 			return ExitUsage
 		}
 		tracking = "release"
 	default:
-		fmt.Fprintf(os.Stderr, "bfctl add: unsupported --strategy %q (only \"release\" is a pin)\n", *strategyFlag)
+		fmt.Fprintf(os.Stderr, "bfctl add: unsupported --strategy %q (only \"release\" is a pin) — pass --strategy release or drop the flag\n", *strategyFlag)
 		return ExitUsage
 	}
 	flavor, err := targetFlavor(*flavorFlag)
@@ -95,8 +95,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	res, err := service.Add(context.Background(), ref, flavor, opts)
 	if err != nil {
 		prog.Stop()
-		fmt.Fprintf(os.Stderr, "bfctl add: %v\n", err)
-		return ExitError
+		return fail("add", err, ExitError)
 	}
 	prog.Stop()
 	fmt.Printf("added %s %s (%s%s)\n", res.ID, res.Version, res.Strategy, sourceSuffix(res.Kind))

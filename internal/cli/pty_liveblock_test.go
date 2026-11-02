@@ -46,6 +46,7 @@ func newPTYFixture(t *testing.T, cols, rows int, stdoutTTY bool) (*ttyProgress, 
 	// Pin a UTF-8 locale: the spinner frames are the braille set on UTF-8
 	// terminals and the ASCII fallback otherwise, and a container with no
 	// locale set must not decide which set these geometry assertions see.
+	// (XD-48 and XD-49 each added this pin independently; kept once.)
 	t.Setenv("LC_ALL", "C.UTF-8")
 	freezeSpinner(t)
 	p := openPTY(t, cols, rows)

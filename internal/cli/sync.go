@@ -35,7 +35,7 @@ func runSync(args []string, _ BuildInfo) int {
 		return code
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "bfctl sync: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(os.Stderr, "bfctl sync: unexpected argument %q — usage: bfctl sync [flags]\n", fs.Arg(0))
 		subcommandUsage(fs)
 		return ExitUsage
 	}
@@ -61,14 +61,14 @@ func runSync(args []string, _ BuildInfo) int {
 	// On SIGINT this is the presentation polish of the interrupt path: the
 	// rollback message below prints on a clean terminal with the cursor
 	// restored, and its wording and exit code stay exactly as they are
-	// (objective O5).
+	// (objective O5) — only the trailing next step is appended, the
+	// additive "errors teach" tail (UX proposal B5).
 	prog.Stop()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "bfctl sync: %v\n", err)
-		return ExitError
+		return fail("sync", err, ExitError)
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
-		fmt.Fprintln(os.Stderr, "bfctl sync: interrupted — completed work is kept, the running install was rolled back")
+		fmt.Fprintln(os.Stderr, "bfctl sync: interrupted — completed work is kept, the running install was rolled back; rerun \"bfctl sync\" to continue")
 		if *jsonOut {
 			_ = printSyncJSON(rep)
 		} else {
@@ -78,13 +78,12 @@ func runSync(args []string, _ BuildInfo) int {
 	}
 	if *jsonOut {
 		if err := printSyncJSON(rep); err != nil {
-			fmt.Fprintf(os.Stderr, "bfctl sync: %v\n", err)
-			return ExitError
+			return fail("sync", err, ExitError)
 		}
 	} else {
 		fmt.Println(rep.Summary())
 		if rep.RateHint != "" {
-			fmt.Printf("note: GitHub rate limited — %s; rerun \"bfctl sync\" after that\n", rep.RateHint)
+			fmt.Printf("note: GitHub rate limited — %s; export GH_TOKEN=<token> (or GITHUB_TOKEN) for 5000 req/h, then rerun \"bfctl sync\" after that\n", rep.RateHint)
 		}
 	}
 	if rep.Failed > 0 {

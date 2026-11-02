@@ -97,7 +97,7 @@ func Run(args []string, bi BuildInfo) int {
 			return c.run(rest[1:], bi)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "bfctl: unknown command %q\n\n", rest[0])
+	fmt.Fprintf(os.Stderr, "bfctl: unknown command %q — pick one of the commands below\n\n", rest[0])
 	usage(os.Stderr)
 	return ExitUsage
 }
@@ -210,6 +210,10 @@ func parseSubcommand(fs *flag.FlagSet, args []string) (code int, ok bool) {
 		if errors.Is(err, flag.ErrHelp) {
 			return ExitOK, false
 		}
+		// The flag package printed its error message and the usage block
+		// above. This trailing next step closes the "errors teach" rule
+		// for the one message the CLI does not author itself.
+		fmt.Fprintf(os.Stderr, "next: fix the flags above and rerun (\"bfctl %s --help\" lists them)\n", fs.Name())
 		return ExitUsage, false
 	}
 	configureLogging()

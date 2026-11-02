@@ -117,6 +117,11 @@ selects the progress rendering explicitly
 Show one table per client flavor:
 Addons, installed versions, strategies, owned directories, TOC
 compatibility and the last upstream tag.
+On a terminal the status cells are colorized with the TUI's status colors
+.Pq green match, yellow warnings, red failures and mismatches, dim unknown
+and a freshness line
+.Pq checked just now
+is printed above the table; redirected output is plain and unchanged.
 .Fl -json
 prints a machine-readable report,
 .Fl -offline
