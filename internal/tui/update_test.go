@@ -295,7 +295,7 @@ func TestTrackKeyStillToggles(t *testing.T) {
 func TestViewRendersBadgeAndColumns(t *testing.T) {
 	m := testModel(t)
 	content := m.View().Content
-	for _, want := range []string{"Forever", "Addon", "Installed", "Upstream", "Strategy", "Status"} {
+	for _, want := range []string{"Forever", "Addon", "Source", "Installed", "Upstream", "Strategy", "Status"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("view is missing %q:\n%s", want, content)
 		}

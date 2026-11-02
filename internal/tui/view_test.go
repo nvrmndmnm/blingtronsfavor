@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // Screen-level acceptance tests for the visual language: the responsive
-// layout, the persistent side detail pane, the color/glyph rules and the
+// layout, the expanded detail view, the color/glyph rules and the
 // header/status/help zones.
 
 // viewTest builds a model with the given terminal capabilities at the given
@@ -75,23 +76,39 @@ func TestLayoutHoldsAtAcceptanceSizes(t *testing.T) {
 	}
 }
 
-func TestSideDetailPaneIsPersistentAtWideWidths(t *testing.T) {
+func TestDetailsHiddenByDefaultAndExpandedOnSelection(t *testing.T) {
 	rows := viewRows()
 
-	// At 120 columns the detail pane is beside the table without any key.
-	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, rows)
-	if !strings.Contains(m.View().Content, "Tracking") {
-		t.Fatal("at 120 columns the detail pane should be persistent beside the table")
+	// On startup and idle the full list is on screen and the details are
+	// hidden — at every width, wide terminals included (XD-56).
+	for _, w := range []int{80, 120} {
+		m := viewTest(t, caps{unicode: true, color: true}, w, 28, rows)
+		if strings.Contains(m.View().Content, "Tracking") {
+			t.Fatalf("width %d: the idle frame shows the detail pane", w)
+		}
 	}
 
-	// Below 120 columns it stays the toggle overlay: closed at first.
-	m = viewTest(t, caps{unicode: true, color: true}, 100, 28, rows)
-	if strings.Contains(m.View().Content, "Tracking") {
-		t.Fatal("below 120 columns the detail pane should start closed")
+	// Selecting an addon opens the dedicated detail view: the list keeps
+	// only its top rows and the details take the remaining space.
+	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, rows)
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	content := m.View().Content
+	if !strings.Contains(content, "Tracking") {
+		t.Fatal("enter should open the expanded detail pane")
 	}
-	m.detail = true
-	if !strings.Contains(m.View().Content, "Tracking") {
-		t.Fatal("the detail toggle should open the overlay below 120 columns")
+	lines := strings.Split(content, "\n")
+	if !strings.Contains(lines[1], "Addon") {
+		t.Fatalf("the list should keep its header row, got %q", lines[1])
+	}
+	boxTop := ansi.Strip(lines[1+detailListRows+1])
+	if !strings.HasPrefix(boxTop, m.theme.box.TopLeft) {
+		t.Fatalf("the detail box should start right below the list's top %d rows, got %q", detailListRows, boxTop)
+	}
+
+	// esc dismisses the pane and restores the full list.
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if strings.Contains(m.View().Content, "Tracking") {
+		t.Fatal("esc should restore the full list without the detail pane")
 	}
 }
 
@@ -102,8 +119,9 @@ func TestTruncatedCellsRevealFullValueInDetailPane(t *testing.T) {
 		{ID: "r1", Name: longName, Installed: longVersion, Upstream: longVersion, Strategy: "release", Tracking: "stable", Status: "-", Source: "owner/repo", SourceKind: "github"},
 	}
 
-	// Wide: the side pane is persistent and holds the full values.
+	// Wide: the expanded detail pane holds the full values.
 	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, rows)
+	m.detail = true
 	content := m.View().Content
 	if !strings.Contains(content, longName) {
 		t.Fatal("detail pane should show the full addon name")
@@ -115,18 +133,18 @@ func TestTruncatedCellsRevealFullValueInDetailPane(t *testing.T) {
 		t.Fatal("detail pane should show the full installed version")
 	}
 
-	// Narrow: the toggle overlay holds the same full values.
+	// Narrow: the same expanded pane holds the same full values.
 	m = viewTest(t, caps{unicode: true, color: true}, 80, 28, rows)
 	m.detail = true
 	content = m.View().Content
 	if !strings.Contains(content, longName) {
-		t.Fatal("detail overlay should show the full addon name")
+		t.Fatal("detail pane should show the full addon name")
 	}
 	if n := strings.Count(content, longName); n != 1 {
 		t.Fatalf("full name appears %d times, want 1 (the table cell should be truncated)", n)
 	}
 	if !strings.Contains(content, longVersion) {
-		t.Fatal("detail overlay should show the full installed version")
+		t.Fatal("detail pane should show the full installed version")
 	}
 }
 
@@ -207,14 +225,14 @@ func TestStatusCellCarriesGlyphAndWord(t *testing.T) {
 
 // detailRow builds one row whose detail pane carries the whole A3 story:
 // the changelog, the TOC verdict facts, the owned directories and the
-// source URL.
+// acquisition source.
 func detailRow() service.AddonRow {
 	return service.AddonRow{
 		ID:         "r1",
 		Name:       "rarescanner",
 		Installed:  "1.60.1.b1",
 		Upstream:   "1.60.1.b2",
-		Strategy:   "direct",
+		Strategy:   "release",
 		Tracking:   "stable",
 		Status:     "Mismatch",
 		BuiltFor:   []int{110002},
@@ -234,7 +252,7 @@ func TestDetailPaneCompletesTheStory(t *testing.T) {
 		"built for 110002",              // plain-language verdict …
 		"outdated",                      // … in two wrapped parts
 		"RareScanner, RareScanner_Data", // owned dirs
-		"https://github.com/o/r",        // source URL, in full
+		"github release",                // the friendly acquisition source (XD-56)
 		"Changelog",                     // the notes section …
 		"- fixed the map overlay",       // … with the installed version's notes
 		"- updated the locales",
@@ -247,8 +265,9 @@ func TestDetailPaneCompletesTheStory(t *testing.T) {
 		t.Errorf("detail pane shows the bare verdict jargon:\n%s", detail)
 	}
 	// The screen shows the same story (the table keeps its short word).
+	m.detail = true
 	content := m.View().Content
-	for _, want := range []string{"built for 110002", "RareScanner_Data", "https://github.com/o/r", "- fixed the map overlay"} {
+	for _, want := range []string{"built for 110002", "RareScanner_Data", "github release", "- fixed the map overlay"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("frame is missing %q", want)
 		}
@@ -360,5 +379,96 @@ func TestZeroMatchesShowsEmptyState(t *testing.T) {
 	}
 	if strings.Contains(content, "rarescanner") {
 		t.Fatalf("zero-match frame still shows the grid:\n%s", content)
+	}
+}
+
+// TestSourceLabelNamesAcquisition pins the Source column's vocabulary
+// (XD-56): the friendly acquisition source — "github release" vs "github
+// built" by strategy, "curseforge" for cfwidget, "wago", a generic git
+// remote as "git" — in the column and in the detail pane's Source field.
+func TestSourceLabelNamesAcquisition(t *testing.T) {
+	tests := []struct {
+		row  service.AddonRow
+		want string
+	}{
+		{service.AddonRow{SourceKind: "github", Strategy: "release"}, "github release"},
+		{service.AddonRow{SourceKind: "github", Strategy: "source-pkgmeta"}, "github built"},
+		{service.AddonRow{SourceKind: "github", Strategy: "-"}, "github"},
+		{service.AddonRow{SourceKind: "cfwidget", Strategy: "direct"}, "curseforge"},
+		{service.AddonRow{SourceKind: "wago", Strategy: "direct"}, "wago"},
+		{service.AddonRow{SourceKind: "git", Strategy: "direct"}, "git"},
+		{service.AddonRow{SourceKind: "manual", Strategy: "manual"}, "manual"},
+		{service.AddonRow{SourceKind: "tukui", Strategy: "direct"}, "tukui"},
+		{service.AddonRow{}, "-"},
+	}
+	for _, tt := range tests {
+		if got := sourceLabel(tt.row); got != tt.want {
+			t.Errorf("sourceLabel(%q/%q) = %q, want %q", tt.row.SourceKind, tt.row.Strategy, got, tt.want)
+		}
+	}
+
+	// The frame's Source column shows the same names — and never the
+	// internal provider name.
+	rows := []service.AddonRow{
+		{ID: "r1", Name: "One", Strategy: "release", Source: "owner/one", SourceKind: "github", Status: "-"},
+		{ID: "r2", Name: "Two", Strategy: "direct", Source: "8315", SourceKind: "cfwidget", Status: "-"},
+		{ID: "r3", Name: "Three", Strategy: "direct", Source: "VBNBxKx5", SourceKind: "wago", Status: "-"},
+	}
+	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, rows)
+	content := m.View().Content
+	for _, want := range []string{"github release", "curseforge", "wago"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("frame is missing the Source column value %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(content, "cfwidget") {
+		t.Fatalf("frame shows the internal provider name cfwidget:\n%s", content)
+	}
+
+	// The detail pane's Source field matches the column's naming.
+	detail := strings.Join(m.detailContent(&rows[1], 40), "\n")
+	if !strings.Contains(detail, "Source") || !strings.Contains(detail, "curseforge") {
+		t.Fatalf("detail pane Source field is missing the friendly name:\n%s", detail)
+	}
+}
+
+// TestHeaderColumnsAlignWithCells pins the header/value alignment
+// (XD-56): header titles, sort marks and column values start at the same
+// cell of every column — the header cells draw exactly the cellGap
+// padding the body rows draw — in every sort mode.
+func TestHeaderColumnsAlignWithCells(t *testing.T) {
+	m := viewTest(t, caps{unicode: true, color: true}, 120, 28, viewRows())
+	m.results = viewResults()
+	for _, mode := range []sortMode{sortByName, sortByStatus, sortByUpstream} {
+		m.sort = mode
+		m.refreshRows()
+		lines := strings.Split(m.View().Content, "\n")
+		header := []rune(ansi.Strip(lines[1]))
+		row := []rune(ansi.Strip(lines[2]))
+
+		plain := make([][]string, 0, len(m.rows))
+		for _, addon := range m.rows {
+			cells, _ := m.plainCells(addon)
+			plain = append(plain, cells)
+		}
+		specs := m.sortSpecs()
+		widths := columnWidths(tableAvail(120, len(specs)), specs, naturalWidths(specs, plain))
+
+		off := 0
+		for i := range widths {
+			content := off + cellGap/2
+			if content >= len(header) || content >= len(row) {
+				t.Fatalf("sort %s: column %d runs past the frame", mode.label(), i)
+			}
+			if header[content] == ' ' || row[content] == ' ' {
+				t.Errorf("sort %s: column %q: header %q and value %q do not start together at offset %d",
+					mode.label(), specs[i].title, header[content], row[content], content)
+			}
+			if header[content-1] != ' ' || row[content-1] != ' ' {
+				t.Errorf("sort %s: column %q: the header and body cells do not draw the same padding",
+					mode.label(), specs[i].title)
+			}
+			off += widths[i] + cellGap
+		}
 	}
 }

@@ -185,13 +185,11 @@ type theme struct {
 	dim     lipgloss.Style // secondary information (root, labels)
 	title   lipgloss.Style // bold headings
 
-	// box is the overlay detail pane border and rule the vertical rule
-	// between the table and the persistent side detail pane.
-	box  lipgloss.Border
-	rule string
+	// box is the expanded detail pane's border.
+	box lipgloss.Border
 }
 
-// asciiBorder is the plain-ASCII box: the fallback for the detail overlay
+// asciiBorder is the plain-ASCII box: the fallback for the detail pane
 // on non-UTF-8 terminals.
 var asciiBorder = lipgloss.Border{
 	Top: "-", Bottom: "-", Left: "|", Right: "|",
@@ -207,7 +205,6 @@ func newTheme(c caps) theme {
 	th := theme{
 		g:       asciiGlyphs,
 		box:     asciiBorder,
-		rule:    "|",
 		dim:     lipgloss.NewStyle().Faint(true),
 		title:   lipgloss.NewStyle().Bold(true),
 		neutral: lipgloss.NewStyle().Faint(true),
@@ -215,7 +212,6 @@ func newTheme(c caps) theme {
 	if c.unicode {
 		th.g = unicodeGlyphs
 		th.box = lipgloss.RoundedBorder()
-		th.rule = "│"
 	}
 	accent := color.Color(lipgloss.NoColor{})
 	if c.color {

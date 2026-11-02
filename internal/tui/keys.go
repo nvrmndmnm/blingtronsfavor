@@ -135,6 +135,12 @@ func (k keyMap) helpSections() []helpSection {
 		}},
 		{title: "add input", rows: []helpRow{
 			{"typing", "enters a reference"},
+			{"paste", "inserts a reference"},
+			{"left/right", "move the cursor"},
+			{"alt+b/alt+f", "move by word"},
+			{"home/end, ctrl+a/ctrl+e", "move to line ends"},
+			{"ctrl+w", "delete word back"},
+			{"ctrl+u", "clear to start"},
 			{"backspace", "erase"},
 			{"enter", "continue"},
 			{"esc", "cancel"},

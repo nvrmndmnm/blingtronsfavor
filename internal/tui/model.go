@@ -95,7 +95,7 @@ type Model struct {
 
 	width, height int
 
-	detail        bool               // detail pane open
+	detail        bool               // expanded detail pane open (the dedicated detail view)
 	detailFocus   bool               // detail pane focused: the scroll keys drive it, enter returns to the table
 	detailScroll  int                // detail pane scroll offset (content lines)
 	filtering     bool               // "/" filter input active
@@ -106,6 +106,7 @@ type Model struct {
 	helpOpen      bool               // full-screen help overlay (?) open
 	addInput      bool               // "a" add input active
 	addText       string             // the reference being typed
+	addCur        int                // input cursor in addText (rune index)
 	addParsed     service.AddRef     // live parse of addText
 	addErr        error              // live parse error, nil while the ref parses
 	addChoose     bool               // target-flavor prompt active (several clients)
@@ -161,6 +162,7 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	helpBar.Styles.FullSeparator = th.dim
 	cols := []table.Column{
 		{Title: "Addon", Width: 24},
+		{Title: "Source", Width: 14},
 		{Title: "Installed", Width: 12},
 		{Title: "Upstream", Width: 14},
 		{Title: "Strategy", Width: 13},
@@ -168,8 +170,12 @@ func NewModel(ctx context.Context, opts Options, rt *runtime) Model {
 	}
 	tbl := table.New(table.WithColumns(cols), table.WithHeight(10), table.WithFocused(true))
 	tbl.SetStyles(table.Styles{
-		Header: th.title,
-		Cell:   lipgloss.NewStyle().Padding(0, 1),
+		// Header and body cells carry the same padding — exactly cellGap/2
+		// cells per side — so the table's header titles sit over their
+		// column values at every width (XD-56): the layout budgets cellGap
+		// cells of padding per cell and both rows draw it the same way.
+		Header: th.title.Padding(0, cellGap/2),
+		Cell:   lipgloss.NewStyle().Padding(0, cellGap/2),
 		// Selection is painted per cell (the accent) so the status color
 		// survives on the selected row.
 		Selected: lipgloss.NewStyle(),
@@ -586,12 +592,15 @@ func (m *Model) selected() *service.AddonRow {
 }
 
 // matchesFilter reports whether the addon matches the active filter: a
-// case-insensitive match against its name or its source (the source kind
-// and reference — "github owner/repo", "wago key").
+// case-insensitive match against its name or its source — the friendly
+// acquisition label the Source column shows ("curseforge", "github
+// release"), the source kind and reference ("github owner/repo", "wago
+// key").
 func matchesFilter(a service.AddonRow, filter string) bool {
 	return containsFold(a.Name, filter) ||
 		containsFold(a.Source, filter) ||
-		containsFold(a.SourceKind, filter)
+		containsFold(a.SourceKind, filter) ||
+		containsFold(sourceLabel(a), filter)
 }
 
 // containsFold reports whether haystack contains needle,

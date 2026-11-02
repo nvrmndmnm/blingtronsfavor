@@ -132,15 +132,16 @@ verdicts
 .Pq Fl -flavor Ns / Ns Fl -interface pin the target client .
 .It Cm tui
 Open the interactive addon manager: an addon table
-.Pq Addon, Installed, Upstream, Strategy, Status
+.Pq Addon, Source, Installed, Upstream, Strategy, Status
 with a styled header bar
 .Pq flavor badge, game version, root and live counts ,
-status and help bars, and a detail pane that is persistent beside the
-table on wide terminals
-.Pq at least 120 columns ,
-and a toggle overlay below it on narrow ones.
-Columns are sized from the terminal; truncated cells show their full
-value in the detail pane.
+status and help bars, and an expanded detail pane that opens on
+selection
+.Pq enter shows the addon's details and shrinks the list to its top rows; esc restores the full list .
+Columns are sized from the terminal; the Source column names how each
+addon was acquired
+.Pq github release, github built, curseforge, wago or a git remote ,
+and truncated cells show their full value in the detail pane.
 Statuses carry a glyph and a word
 .Pq green up to date, yellow update available, red failed/Missing, dim skipped ,
 and color never carries meaning alone.
@@ -153,7 +154,7 @@ toggle release/branch tracking,
 delete with confirmation,
 .Ar a
 add an addon
-.Pq inline ref input, validated live; several configured clients ask for the target flavor ,
+.Pq inline ref input with paste and readline editing keys, validated live; several configured clients ask for the target flavor ,
 .Ar enter
 detail pane toggle,
 .Ar /

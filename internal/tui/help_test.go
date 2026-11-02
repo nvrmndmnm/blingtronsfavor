@@ -33,6 +33,8 @@ func TestHelpOverlayListsEveryKeyByContext(t *testing.T) {
 			"s release/branch", "d delete", "? help", "q quit", "ctrl+c cancel & quit",
 			// The modal contexts' keys.
 			"typing", "backspace", "y/enter", "n/esc", "1-9", "esc", "enter", "q ask to quit",
+			// The add input's editing keys (XD-56).
+			"paste", "left/right", "alt+b/alt+f", "home/end, ctrl+a/ctrl+e", "ctrl+w", "ctrl+u",
 		} {
 			if !strings.Contains(content, want) {
 				t.Errorf("width %d: help overlay is missing %q:\n%s", w, want, content)
