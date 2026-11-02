@@ -15,7 +15,9 @@ import (
 // runSync implements "bfctl sync": it delegates to the shared service layer,
 // which resolves every managed addon against its upstream and installs
 // updates atomically — several addons at a time — and reports the outcome
-// as text or JSON. While the work runs, progress reports stream to stderr
+// as text or JSON. --flavor scopes the run to one configured client flavor
+// — the same per-client scope the TUI's sync runs with; without it every
+// configured flavor is synced. While the work runs, progress reports stream to stderr
 // through the shared renderer (over a terminal a live block with one row
 // per addon — "syncing: 1/4 flavor/addon: downloading" spinning in place
 // until the row flips to its terminal line and then becomes the addon's
@@ -27,6 +29,7 @@ import (
 // aborts through the installer's rollback and exits 1.
 func runSync(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("sync")
+	flavorFlag := registerFlavorFlag(fs, scopedFlavorUsage)
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
 	explain := fs.Bool("explain", false, "show why each plan was selected")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
@@ -39,6 +42,11 @@ func runSync(args []string, _ BuildInfo) int {
 		subcommandUsage(fs)
 		return ExitUsage
 	}
+	flavor, err := scopedFlavor(*flavorFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bfctl sync: %v\n", err)
+		return ExitUsage
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -48,6 +56,7 @@ func runSync(args []string, _ BuildInfo) int {
 
 	rep, err := service.Sync(ctx, service.SyncOptions{
 		CheckOnly: *checkOnly,
+		Flavor:    flavor,
 	}, func(r service.Result) {
 		if !*jsonOut {
 			// The unit's row becomes its result line: Print writes the

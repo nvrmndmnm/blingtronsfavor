@@ -20,7 +20,7 @@ var errNotManaged = errors.New("not managed by bfctl")
 // directories through the atomic installer and drops its state entry.
 func runRemove(args []string, _ BuildInfo) int {
 	fs := subcommandFlagSet("remove")
-	flavorFlag := fs.String("flavor", "", "client flavor to remove from: mainline, forever (a.k.a. camelot), classic or mists (required when the addon is installed for several)")
+	flavorFlag := registerFlavorFlag(fs, requiredFlavorUsage)
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -61,9 +61,9 @@ func runRemove(args []string, _ BuildInfo) int {
 // the summary line.
 func resolveRemoveFlavor(st *state.State, id, flavorFlag string) (client.Flavor, []string, error) {
 	if flavorFlag != "" {
-		flavor, ok := client.FlavorForKey(flavorFlag)
-		if !ok {
-			return "", nil, fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists; \"camelot\" is an accepted spelling of forever)", flavorFlag)
+		flavor, err := parseFlavor(flavorFlag)
+		if err != nil {
+			return "", nil, err
 		}
 		cs := st.Client(flavor)
 		if cs == nil || cs.Addons[id] == nil {

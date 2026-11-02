@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/service"
 	"github.com/itp5b5/blessforge/internal/state"
@@ -31,7 +29,7 @@ func runAdd(args []string, bi BuildInfo) int {
 	fs := subcommandFlagSet("add")
 	branchFlag := fs.String("branch", "", "branch to track instead of stable releases")
 	strategyFlag := fs.String("strategy", "", "install strategy pin: \"release\" pins to GitHub releases and silences the staleness detector")
-	flavorFlag := fs.String("flavor", "", "client flavor to install for: mainline, forever (a.k.a. camelot), classic or mists (required when several are configured)")
+	flavorFlag := registerFlavorFlag(fs, requiredFlavorUsage)
 	forceFlag := fs.Bool("force", false, "take over addon directories owned by another addon")
 	explainFlag := fs.Bool("explain", false, "show why the plan was selected")
 	progress := registerProgressFlag(fs)
@@ -114,41 +112,4 @@ func sourceSuffix(kind state.SourceKind) string {
 		return ", cfwidget"
 	}
 	return ""
-}
-
-// targetFlavor picks the client flavor "bfctl add" installs for: --flavor
-// when it is passed, otherwise the single configured client flavor.
-func targetFlavor(flavorFlag string) (client.Flavor, error) {
-	st, err := loadState()
-	if err != nil {
-		return "", fmt.Errorf("read state: %w", err)
-	}
-	if flavorFlag != "" {
-		flavor, ok := client.FlavorForKey(flavorFlag)
-		if !ok {
-			return "", fmt.Errorf("unknown flavor %q (want mainline, forever, classic or mists; \"camelot\" is an accepted spelling of forever)", flavorFlag)
-		}
-		if st.Client(flavor) == nil {
-			return "", fmt.Errorf("no client configured for flavor %s: run \"bfctl init\" first", flavor)
-		}
-		return flavor, nil
-	}
-	clients := sortedClients(st)
-	switch len(clients) {
-	case 0:
-		return "", fmt.Errorf("no client configured: run \"bfctl init\" first")
-	case 1:
-		return clients[0].Flavor, nil
-	default:
-		return "", fmt.Errorf("several clients configured (%s): pass --flavor", clientList(clients))
-	}
-}
-
-// clientList renders the recorded flavors for error messages.
-func clientList(clients []*state.ClientState) string {
-	flavors := make([]string, 0, len(clients))
-	for _, cs := range clients {
-		flavors = append(flavors, string(cs.Flavor))
-	}
-	return strings.Join(flavors, ", ")
 }
