@@ -9,7 +9,7 @@
 .Cm init
 .Fl -path Ar root
 .Nm
-.Cm add Ar source Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force
+.Cm add Ar source Op Fl -flavor Ar flavor Op Fl -branch Ar branch Op Fl -strategy Cm release Op Fl -force Op Fl -progress Ar mode
 .Nm
 .Cm remove Ar id Op Fl -flavor Ar flavor
 .Nm
@@ -17,6 +17,7 @@
 .Op Fl -check-only
 .Op Fl -explain
 .Op Fl -json
+.Op Fl -progress Ar mode
 .Nm
 .Cm status
 .Op Fl -json
@@ -108,7 +109,10 @@ reports without downloading,
 .Fl -explain
 annotates the resolution reason of each plan,
 .Fl -json
-prints a machine-readable report.
+prints a machine-readable report, and
+.Fl -progress Ar mode
+selects the progress rendering explicitly
+.Pq see Sx PROGRESS OUTPUT and Sx UX CONTRACT .
 .It Cm status
 Show one table per client flavor:
 Addons, installed versions, strategies, owned directories, TOC
@@ -133,7 +137,7 @@ and a toggle overlay below it on narrow ones.
 Columns are sized from the terminal; truncated cells show their full
 value in the detail pane.
 Statuses carry a glyph and a word
-.Pq green up to date, yellow update available, red failed/Missing, dim manual ,
+.Pq green up to date, yellow update available, red failed/Missing, dim skipped ,
 and color never carries meaning alone.
 Keys:
 .Ar u
@@ -260,6 +264,27 @@ rate-limit wait.
 .Fl q , -quiet
 suppresses progress entirely.
 .Pp
+.Fl -progress Ar mode
+makes the rendering mode explicit and scriptable on
+.Cm sync , Cm add
+and
+.Cm adopt :
+.Ar auto
+.Pq the default
+is the terminal detection described above,
+.Ar live
+forces the live block even off a terminal,
+.Ar plain
+forces the incremental lines even on a terminal, and
+.Ar none
+silences progress entirely
+.Pq the frozen result lines still reach standard output .
+An explicit mode overrides
+.Fl q , -quiet
+for progress rendering; the vocabulary in
+.Sx UX CONTRACT
+never changes with the mode.
+.Pp
 Stream discipline: results and the
 .Fl -json
 report stay alone on standard output; progress and logs use standard
@@ -277,6 +302,97 @@ the rows in flight are kept as they are and the cursor restored before
 the rollback
 message prints
 .Pq see Sx SIGNALS .
+.Sh UX CONTRACT
+The display vocabulary is frozen here the way the output contracts are:
+every display surface — the live block, the TUI and the pipe lines —
+labels each state with the words below, and display changes must keep
+them.
+The frozen contracts in
+.Sx JSON OUTPUT
+and
+.Sx PROGRESS OUTPUT
+are untouched by this vocabulary.
+.Ss Phase labels
+One shared word labels every progress state, in this order:
+.Ar resolving , downloading , installing ,
+then one terminal label:
+.Ar done , failed
+or
+.Ar skipped .
+The words are identical across surfaces for the same state: a live row
+reads
+.Qq <verb>: <index>/<total> <flavor>/<addon>: <phase>[: <reason>] ,
+the TUI status cell shows the phase word beside its row spinner, and the
+terminal event opens the row's terminal line with the terminal label as
+its first word on both surfaces.
+.Ss Result labels
+One label settles each outcome, the same words on every surface:
+.Bd -literal -offset indent
+up to date
+updated <from> -> <to>
+installed <to>
+update available
+available to install
+skipped[: <reason>]
+failed: <error>
+.Ed
+.Pp
+The TUI status cell renders these labels with the terminal's arrow glyph
+for
+.Ar -> ,
+and the row's Installed and Upstream columns carry the versions behind
+.Qq up to date
+and
+.Qq update available .
+The per-addon result lines render the same labels in their frozen
+historical shapes:
+.Qq up to date (<to>) ,
+.Qq updated <from> -> <to> ,
+.Qq installed <to> ,
+.Qq update available (<from> -> <to>) ,
+.Qq <to> available to install ,
+.Qq skipped: <reason> ,
+.Qq error: <error> .
+.Ss Verbs and counters
+The live rows' verb names the flow:
+.Ar syncing
+for a run that installs,
+.Ar checking
+for a check-only run
+.Pq Cm sync Fl -check-only and the TUI check preview ,
+.Ar adding
+for
+.Cm add
+and the TUI add flow, and
+.Ar adopting
+for
+.Cm adopt .
+The TUI run frame counts the terminal labels
+.Qq syncing 2/5 · 1 done · 1 failed · 1 skipped ,
+and the run summary keeps its frozen wording
+.Qq 2 up to date, 1 updated, 1 manual skipped, 1 failed .
+.Ss Colors and glyphs
+Colour is drawn only on a terminal and never carries meaning alone: every
+status cell pairs its colour with a glyph and a word, and
+.Ev NO_COLOR
+keeps every word while dropping every colour.
+The status glyphs degrade from
+.Qq ✓ ⚠ ✗ …
+to
+.Qq + ! x *
+with the locale on non-UTF-8 terminals.
+.Ss Frozen wording
+Some contract wordings predate this vocabulary and stay exactly as they
+are: a failure's per-addon result line is prefixed
+.Qq error:
+while every display label for that state is
+.Qq failed ,
+the run summary counts
+.Qq manual skipped ,
+and the JSON report keys the same counter
+.Va manual_skipped .
+These are frozen output-contract wordings, not display vocabulary, and
+display changes must not touch them.
 .Sh SIGNALS
 .Bl -tag -width SIGINT
 .It Dv SIGINT

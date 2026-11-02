@@ -30,6 +30,7 @@ func runSync(args []string, _ BuildInfo) int {
 	checkOnly := fs.Bool("check-only", false, "resolve and report only: no downloads, no installs")
 	explain := fs.Bool("explain", false, "show why each plan was selected")
 	jsonOut := fs.Bool("json", false, "machine-readable JSON report on stdout")
+	progress := registerProgressFlag(fs)
 	if code, ok := parseSubcommand(fs, args); !ok {
 		return code
 	}
@@ -42,7 +43,7 @@ func runSync(args []string, _ BuildInfo) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	prog := newProgressRenderer(os.Stderr, progressOptions{Quiet: logQuiet, TTY: stderrIsTTY(), Verb: "syncing"})
+	prog := newProgressRenderer(os.Stderr, progressOptions{Mode: *progress, Quiet: logQuiet, TTY: stderrIsTTY(), Verb: syncVerb(*checkOnly)})
 	defer prog.Stop()
 
 	rep, err := service.Sync(ctx, service.SyncOptions{
@@ -90,6 +91,16 @@ func runSync(args []string, _ BuildInfo) int {
 		return ExitPartial
 	}
 	return ExitOK
+}
+
+// syncVerb names the flow on the live rows: a check-only run resolves and
+// reports but installs nothing, so its rows work under "checking" — the
+// same verb the TUI's check preview uses (one vocabulary, both surfaces).
+func syncVerb(checkOnly bool) string {
+	if checkOnly {
+		return "checking"
+	}
+	return "syncing"
 }
 
 // resultLines renders one per-addon outcome, matching the historical

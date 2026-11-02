@@ -50,7 +50,7 @@ type glyphs struct {
 	Check    string // status: up to date / updated / match
 	Warn     string // status: update available / soft problems
 	Cross    string // status: failed / missing / mismatch
-	Pending  string // status: manual / unknown / none
+	Pending  string // status: skipped / unknown / none
 	Arrow    string // version transitions ("updated 1.0 → 1.1")
 	Ellipsis string // text truncation marker
 	Dash     string // prose dashes
@@ -102,7 +102,7 @@ var asciiGlyphs = glyphs{
 type statusClass int
 
 const (
-	statusNeutral statusClass = iota // manual, "-", unknown
+	statusNeutral statusClass = iota // skipped, "-", unknown
 	statusGood                       // up to date, updated, installed, match
 	statusWarn                       // update available, soft problems
 	statusBad                        // failed, missing, mismatch
@@ -110,8 +110,9 @@ const (
 
 // classifyStatus maps a status word to its semantic class. The words come
 // either from the last sync result ("up to date", "updated 1.0 → 1.1",
-// "update 1.2", "manual", "failed") or from the TOC verdict ("Match",
-// "MultiMatch", "Mismatch", "NoToc", "Unknown", "Missing", "-").
+// "update available", "available to install", "skipped", "failed" — the
+// shared result vocabulary the UX contract fixes) or from the TOC verdict
+// ("Match", "MultiMatch", "Mismatch", "NoToc", "Unknown", "Missing", "-").
 func classifyStatus(word string) statusClass {
 	switch {
 	case word == "Match",
@@ -122,7 +123,8 @@ func classifyStatus(word string) statusClass {
 		return statusGood
 	case word == "MultiMatch",
 		word == "NoToc",
-		strings.HasPrefix(word, "update "):
+		strings.HasPrefix(word, "update "),
+		strings.HasSuffix(word, "available to install"):
 		return statusWarn
 	case word == "Mismatch",
 		word == "Missing",
@@ -143,7 +145,7 @@ type theme struct {
 	good    lipgloss.Style // up-to-date class
 	warn    lipgloss.Style // update-available class
 	bad     lipgloss.Style // failed / missing class
-	neutral lipgloss.Style // manual / unknown / "-"
+	neutral lipgloss.Style // skipped / unknown / "-"
 	dim     lipgloss.Style // secondary information (root, labels)
 	title   lipgloss.Style // bold headings
 

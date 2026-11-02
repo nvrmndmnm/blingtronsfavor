@@ -33,7 +33,9 @@ func tick(t *testing.T, m Model) Model {
 func beginSync(m Model) Model {
 	m.syncing = true
 	m.run = newSyncRun()
-	m.live = liveState{}
+	// rows is always non-nil in the real flow (run.sample() builds the
+	// map), so arm it the same way: tests write run state directly.
+	m.live = liveState{rows: make(map[string]liveRow)}
 	m.wait = ""
 	m.statusLine = ""
 	return m

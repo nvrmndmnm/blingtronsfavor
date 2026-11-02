@@ -26,7 +26,8 @@ _bfctl() {
 		_arguments \
 			'--check-only[resolve and report only]' \
 			'--explain[show why each plan was selected]' \
-			'--json[machine-readable JSON report]'
+			'--json[machine-readable JSON report]' \
+			'--progress[progress rendering]:mode:(auto live plain none)'
 		;;
 	status)
 		_arguments \
@@ -42,7 +43,8 @@ _bfctl() {
 			'--strategy[install strategy pin]:strategy:(release)' \
 			'--flavor[client flavor]:flavor:('"$flavor_opts"')' \
 			'--force[take over addon directories owned by another addon]' \
-			'--explain[show why the plan was selected]'
+			'--explain[show why the plan was selected]' \
+			'--progress[progress rendering]:mode:(auto live plain none)'
 		;;
 	remove)
 		_arguments '--flavor[client flavor]:flavor:('"$flavor_opts"')'
