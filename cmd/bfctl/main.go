@@ -1,4 +1,4 @@
-// Command bfctl is the BlessForge command-line addon manager.
+// Command bfctl is the Blingtron's Favor command-line addon manager.
 package main
 
 import (

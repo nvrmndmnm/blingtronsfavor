@@ -234,7 +234,7 @@ func configureLogging() {
 }
 
 func usage(w io.Writer) {
-	_, _ = fmt.Fprint(w, `bfctl - BlessForge addon manager
+	_, _ = fmt.Fprint(w, `bfctl - Blingtron's Favor addon manager
 
 Usage:
   bfctl [global flags] <command> [flags]
