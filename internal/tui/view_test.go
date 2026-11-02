@@ -149,22 +149,34 @@ func TestTruncatedCellsRevealFullValueInDetailPane(t *testing.T) {
 }
 
 func TestASCIIModeDegradesAllGlyphs(t *testing.T) {
-	m := viewTest(t, caps{unicode: false, color: false}, 100, 28, viewRows())
-	m.results = viewResults()
-	m.detail = true
-	for i, line := range strings.Split(m.View().Content, "\n") {
-		for _, r := range line {
-			if r > 127 {
-				t.Fatalf("ASCII mode: line %d contains non-ASCII rune %q:\n%q", i, r, line)
+	assertASCIIOnly := func(t *testing.T, frame string) {
+		t.Helper()
+		for i, line := range strings.Split(frame, "\n") {
+			for _, r := range line {
+				if r > 127 {
+					t.Fatalf("ASCII mode: line %d contains non-ASCII rune %q:\n%q", i, r, line)
+				}
 			}
 		}
 	}
-	// The ASCII status glyphs carry their words.
+
+	// The full list (details hidden) renders every row, and the ASCII
+	// status glyphs carry their words.
+	m := viewTest(t, caps{unicode: false, color: false}, 100, 28, viewRows())
+	m.results = viewResults()
+	content := m.View().Content
+	assertASCIIOnly(t, content)
 	for _, want := range []string{"+ up to date", "! update available", "x failed", "* skipped", "+ updated"} {
-		if !strings.Contains(m.View().Content, want) {
+		if !strings.Contains(content, want) {
 			t.Errorf("ASCII mode: frame is missing %q", want)
 		}
 	}
+
+	// The expanded detail pane degrades to ASCII too — borders included.
+	// (Only the list's top rows stay on screen here, so the status words
+	// above are asserted on the full list only.)
+	m.detail = true
+	assertASCIIOnly(t, m.View().Content)
 }
 
 func TestColorNeverCarriesMeaningAlone(t *testing.T) {
