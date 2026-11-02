@@ -115,6 +115,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.status = msg.status
 		m.checkedAt = time.Now()
+		m.armClientSwitch()
 		m.pickClient()
 		if m.pendingFlavor != "" {
 			for i := range m.status.Clients {
@@ -344,6 +345,24 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.sort = m.sort.next()
 		m.refreshRows()
 		m.statusLine = "sorted by " + m.sort.label()
+	case key.Matches(msg, m.keys.Client):
+		// tab / [ ] cycle the configured clients. A run is bound to the
+		// client it started on — sync is per-client — so the switch is
+		// refused while one is in flight.
+		if m.syncing || m.adding {
+			run, article := "sync", "a"
+			if m.adding {
+				run, article = "add", "an"
+			}
+			m.statusLine = "can't switch client mid-" + run + " " + m.theme.g.Dash + " " + article +
+				" " + run + " is bound to " + m.clientLabel() + ", wait for it to finish"
+			return m, nil
+		}
+		delta := 1 // tab and ] step forward, [ steps back
+		if msg.String() == "[" {
+			delta = -1
+		}
+		m.switchClient(delta)
 	case msg.String() == "esc" && m.filter != "":
 		// esc returns to the full list: it drops the applied filter
 		// (while the filter input is open it cancels the input instead,
@@ -478,10 +497,14 @@ func (m Model) confirmQuit() (tea.Model, tea.Cmd) {
 // into the addon rows and the status bar. The spinner keeps turning until
 // the run reports back. opts scopes the run: the plain update-all ("u"),
 // the check-only preview ("c") or the selected addon only ("U") — every
-// run reports through the same live-row stream.
+// run reports through the same live-row stream. Every run is scoped to
+// the active client's flavor (sync is per-client): its live rows and
+// counters describe the table it started on.
 func (m Model) startSync(opts service.SyncOptions) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.ctx)
 	run := newSyncRun()
+	// Sync is per-client: the run works on the active flavor's addons.
+	opts.Flavor = client.Flavor(m.client.Flavor)
 	m.syncing = true
 	m.checkOnly = opts.CheckOnly
 	m.cancelSync = cancel

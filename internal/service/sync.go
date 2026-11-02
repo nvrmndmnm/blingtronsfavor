@@ -20,6 +20,11 @@ import (
 type SyncOptions struct {
 	// CheckOnly resolves and reports only: no downloads, no installs.
 	CheckOnly bool
+	// Flavor, when non-empty, restricts the run to one client flavor's
+	// addons — sync is per-client: the TUI runs against the client flavor
+	// its table shows. Empty runs every configured client, the CLI's
+	// unscoped "bfctl sync".
+	Flavor client.Flavor
 	// Only, when non-nil, restricts the run to the one named unit — the
 	// TUI's "update selected addon" — instead of every managed addon.
 	Only *Unit
@@ -112,7 +117,7 @@ func Sync(ctx context.Context, opts SyncOptions, onResult func(Result), onProgre
 	if err != nil {
 		return Report{}, fmt.Errorf("create github client: %w", err)
 	}
-	tasks := collectTasks(st)
+	tasks := filterTasksByFlavor(collectTasks(st), opts.Flavor)
 	if opts.Only != nil {
 		tasks = filterTasks(tasks, *opts.Only)
 	}
@@ -346,6 +351,22 @@ func filterTasks(tasks []syncTask, unit Unit) []syncTask {
 	var out []syncTask
 	for _, t := range tasks {
 		if t.flavor == unit.Flavor && t.addon.ID == unit.AddonID {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// filterTasksByFlavor restricts a run to one client flavor's tasks — the
+// TUI's per-client scope. An empty flavor keeps every task (the CLI's
+// unscoped run).
+func filterTasksByFlavor(tasks []syncTask, flavor client.Flavor) []syncTask {
+	if flavor == "" {
+		return tasks
+	}
+	var out []syncTask
+	for _, t := range tasks {
+		if t.flavor == flavor {
 			out = append(out, t)
 		}
 	}

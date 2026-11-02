@@ -12,6 +12,7 @@ import (
 
 	"github.com/itp5b5/blessforge/internal/client"
 	"github.com/itp5b5/blessforge/internal/github"
+	"github.com/itp5b5/blessforge/internal/paths"
 	"github.com/itp5b5/blessforge/internal/provider"
 	"github.com/itp5b5/blessforge/internal/resolver"
 	"github.com/itp5b5/blessforge/internal/state"
@@ -390,6 +391,29 @@ func TestFilterTasksRestrictsRunToOneUnit(t *testing.T) {
 	}
 }
 
+// TestFilterTasksByFlavorRestrictsRunToOneClient checks the TUI's
+// per-client scope: only the named flavor's tasks survive, and an empty
+// flavor keeps every task (the CLI's unscoped run).
+func TestFilterTasksByFlavorRestrictsRunToOneClient(t *testing.T) {
+	tasks := []syncTask{
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "Alpha"}},
+		{flavor: client.FlavorClassic, addon: &state.AddonState{ID: "Beta"}},
+		{flavor: client.FlavorForever, addon: &state.AddonState{ID: "Beta"}},
+	}
+	got := filterTasksByFlavor(tasks, client.FlavorForever)
+	if len(got) != 2 {
+		t.Fatalf("filterTasksByFlavor = %+v, want the two Forever tasks", got)
+	}
+	for _, task := range got {
+		if task.flavor != client.FlavorForever {
+			t.Fatalf("filterTasksByFlavor = %+v, want only Forever tasks", got)
+		}
+	}
+	if all := filterTasksByFlavor(tasks, ""); len(all) != len(tasks) {
+		t.Fatalf("filterTasksByFlavor(empty) = %d tasks, want all %d", len(all), len(tasks))
+	}
+}
+
 // TestSyncOnlyRunsSelectedUnit drives Sync with Only set over two manual
 // entries: exactly the named unit runs (it skips, like any manual entry),
 // and its workload frame is 1 of 1 — the other addon is never touched.
@@ -415,5 +439,54 @@ func TestSyncOnlyRunsSelectedUnit(t *testing.T) {
 	}
 	if ev := got[0]; ev.Unit != (Unit{Flavor: client.FlavorForever, AddonID: "Beta"}) || ev.Index != 1 || ev.Total != 1 {
 		t.Errorf("frame = %+v, want Beta 1 of 1", ev)
+	}
+}
+
+// TestSyncFlavorScopesTheRunToOneClient drives Sync with Flavor set over
+// two clients holding one manual entry each: only the named flavor's addon
+// runs — and its workload frame is 1 of 1, the other client is never
+// touched (sync is per-client).
+func TestSyncFlavorScopesTheRunToOneClient(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	if err := paths.EnsureLayout(); err != nil {
+		t.Fatal(err)
+	}
+	path, err := paths.StateFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manual := func(id string) *state.AddonState {
+		return &state.AddonState{ID: id, Strategy: state.StrategyManual, Source: state.SourceRef{Kind: state.SourceManual, Slug: id}}
+	}
+	st := state.New()
+	st.Clients[client.FlavorForever] = &state.ClientState{
+		Flavor: client.FlavorForever, Root: filepath.Join(t.TempDir(), "_forever_"),
+		Addons: map[string]*state.AddonState{"ForeverOne": manual("ForeverOne")},
+	}
+	st.Clients[client.FlavorClassic] = &state.ClientState{
+		Flavor: client.FlavorClassic, Root: filepath.Join(t.TempDir(), "_classic_"),
+		Addons: map[string]*state.AddonState{"ClassicOne": manual("ClassicOne")},
+	}
+	if err := state.Open(path).Save(st); err != nil {
+		t.Fatal(err)
+	}
+	var got []ProgressEvent
+	rep, err := Sync(context.Background(), SyncOptions{Flavor: client.FlavorClassic}, nil,
+		func(ev ProgressEvent) { got = append(got, ev) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if rep.Skipped != 1 || len(rep.Results) != 1 {
+		t.Fatalf("report = %+v, want exactly one skipped unit", rep)
+	}
+	if r := rep.Results[0]; r.AddonID != "ClassicOne" {
+		t.Fatalf("result = %+v, want ClassicOne", r)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d events (%+v), want one terminal event", len(got), got)
+	}
+	if ev := got[0]; ev.Unit != (Unit{Flavor: client.FlavorClassic, AddonID: "ClassicOne"}) || ev.Index != 1 || ev.Total != 1 {
+		t.Errorf("frame = %+v, want ClassicOne 1 of 1", ev)
 	}
 }
